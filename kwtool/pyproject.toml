@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kwtool"
+version = "0.1.0"
+description = "Visible Chrome-based web verification workbench"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6-Essentials>=6.8,<7",
+    "playwright>=1.55,<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "pyinstaller>=6,<7"]
+
+[project.scripts]
+kwtool = "kwtool.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["kwtool*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
