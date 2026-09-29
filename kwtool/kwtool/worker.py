@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import queue
+import logging
 from datetime import datetime
 from pathlib import Path
 from threading import Event
@@ -18,7 +19,6 @@ class BrowserWorker(QThread):
     browser_status = Signal(bool, str)
     batch_state = Signal(str)
     progress = Signal(str)
-    waiting_for_user = Signal(str)
     row_result = Signal(int, str, bool, str)
     batch_result = Signal(int, int, bool)
 
@@ -29,36 +29,19 @@ class BrowserWorker(QThread):
         self._layout = layout
         self._commands: queue.Queue[BatchRequest | None] = queue.Queue()
         self._stop = Event()
-        self._continue = Event()
         self._shutdown = Event()
 
     def submit(self, request: BatchRequest) -> None:
         self._stop.clear()
-        self._continue.clear()
         self._commands.put(request)
 
     def stop_batch(self) -> None:
         self._stop.set()
-        self._continue.set()
-
-    def continue_after_user(self) -> None:
-        self._continue.set()
 
     def shutdown(self) -> None:
         self._shutdown.set()
         self.stop_batch()
         self._commands.put(None)
-
-    def _await_user(self, message: str) -> None:
-        self.waiting_for_user.emit(message)
-        self.batch_state.emit("waiting")
-        self._continue.clear()
-        while not self._continue.wait(0.1):
-            if self._stop.is_set() or self._shutdown.is_set():
-                raise RunCancelled()
-        if self._stop.is_set() or self._shutdown.is_set():
-            raise RunCancelled()
-        self.batch_state.emit("running")
 
     def _launch(self, playwright) -> BrowserContext:
         self._profile_dir.mkdir(parents=True, exist_ok=True)
@@ -119,7 +102,6 @@ class BrowserWorker(QThread):
                     site_settings=request.site_settings,
                     stop_event=self._stop,
                     report_status=self.progress.emit,
-                    request_user_continue=self._await_user,
                     artifacts=artifacts,
                 )
                 adapter.run_one(run, subject)
@@ -130,6 +112,7 @@ class BrowserWorker(QThread):
                 stopped = True
                 break
             except Exception as exc:
+                logging.getLogger("kwtool").exception("主体处理失败：%s", subject)
                 failures += 1
                 self.row_result.emit(index, subject, False, str(exc))
                 if isinstance(exc, PlaywrightError) and "closed" in str(exc).lower():
@@ -168,6 +151,7 @@ class BrowserWorker(QThread):
                         if browser_closed:
                             browser = None
                     except Exception as exc:
+                        logging.getLogger("kwtool").exception("批次执行失败")
                         self.progress.emit(f"批次执行失败：{exc}")
                         self.batch_state.emit("idle")
                         self.batch_result.emit(0, 0, True)
@@ -183,6 +167,7 @@ class BrowserWorker(QThread):
                     except PlaywrightError:
                         pass
         except Exception as exc:
+            logging.getLogger("kwtool").exception("Playwright 初始化失败")
             self.browser_status.emit(False, f"Playwright 初始化失败：{exc}")
             self.batch_state.emit("idle")
             if not self._commands.empty():
