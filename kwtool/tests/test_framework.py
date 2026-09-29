@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from threading import Event
+import re
 
 import pytest
 
-from kwtool.adapters.base import RunCancelled, RunContext, SiteUnavailable
+from kwtool.adapters.base import RunCancelled, RunContext, SiteUnavailable, print_header
 from kwtool.adapters.demo import DemoAdapter
 from kwtool.adapters import registered_adapters
 from kwtool.adapters.gsxt import GsxtAdapter
@@ -90,12 +91,16 @@ def test_demo_adapter_prints_with_browser_headers(tmp_path: Path) -> None:
     assert page.pdf_options["scale"] == 0.8
     assert page.pdf_options["print_background"] is False
     assert page.pdf_options["margin"]["left"] == "5mm"
-    assert 'class="date"' in page.pdf_options["header_template"]
+    assert re.search(r"\d{4}/\d{1,2}/\d{1,2} \d{2}:\d{2}", page.pdf_options["header_template"])
     assert 'class="title"' in page.pdf_options["header_template"]
     assert 'class="url"' in page.pdf_options["footer_template"]
     assert 'class="pageNumber"' in page.pdf_options["footer_template"]
     assert artifacts == [tmp_path / "demo.pdf"]
     assert artifacts[0].read_bytes().startswith(b"%PDF")
+
+
+def test_print_header_formats_local_datetime_without_zero_padded_date() -> None:
+    assert "2026/9/29 18:33" in print_header(datetime(2026, 9, 29, 18, 33))
 
 
 def test_stop_interrupts_manual_step(tmp_path: Path) -> None:

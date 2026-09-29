@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from threading import Event
 from typing import Callable
@@ -14,7 +15,13 @@ from kwtool.output import save_download, save_pdf_bytes
 
 PRINT_HEADER = ('<div style="width:100%;font-size:8px;color:#111;padding:0 0.35in;'
                 'display:flex;justify-content:space-between">'
-                '<span class="date"></span><span class="title"></span><span style="width:90px"></span></div>')
+                '<span>{datetime}</span><span class="title"></span><span style="width:90px"></span></div>')
+
+
+def print_header(now: datetime) -> str:
+    return PRINT_HEADER.format(datetime=f"{now.year}/{now.month}/{now.day} {now:%H:%M}")
+
+
 PRINT_FOOTER = ('<div style="width:100%;font-size:8px;color:#111;padding:0 0.35in;'
                 'display:flex;justify-content:space-between">'
                 '<span class="url" style="max-width:85%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>'
@@ -73,7 +80,7 @@ class RunContext:
             landscape=settings.landscape,
             scale=settings.scale,
             display_header_footer=True,
-            header_template=PRINT_HEADER,
+            header_template=print_header(datetime.now()),
             footer_template=PRINT_FOOTER,
             print_background=settings.print_background,
             prefer_css_page_size=False,
