@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QStandardPaths
+from PySide6.QtCore import Qt, QStandardPaths, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -22,6 +24,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QSplitter,
+    QStyle,
     QToolButton,
     QToolTip,
     QVBoxLayout,
@@ -30,7 +33,7 @@ from PySide6.QtWidgets import (
 
 from kwtool.adapters import registered_adapters
 from kwtool.models import BatchRequest, BrowserLayout, FieldSpec, PdfSettings
-from kwtool.output import validate_template
+from kwtool.output import OutputPlan, validate_template
 from kwtool.preferences import default_template, load_settings, profile_path, save_settings, settings_path
 from kwtool.worker import BrowserWorker
 
@@ -38,6 +41,15 @@ from kwtool.worker import BrowserWorker
 def documents_base() -> Path:
     documents = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
     return Path(documents) / "kwtool" if documents else Path.home() / "Documents" / "kwtool"
+
+
+def format_batch_summary(successes: int, failures: int, stopped: bool, total: int, last_error: str) -> str:
+    summary = f"批次{'已停止' if stopped else '完成'}：成功 {successes}，失败 {failures}"
+    if stopped and total > successes + failures:
+        summary += f"，未处理 {total - successes - failures}"
+    if last_error:
+        summary += f"\n最近失败：{last_error}"
+    return summary
 
 
 class MainWindow(QWidget):
@@ -55,6 +67,7 @@ class MainWindow(QWidget):
         self._closing = False
         self._close_connected = False
         self._running = False
+        self._last_row_error = ""
         self._browser_error = ""
         self._output_base = documents_base()
         log_path = settings_path().parent / "kwtool.log"
@@ -83,6 +96,7 @@ class MainWindow(QWidget):
         self._worker.browser_status.connect(self._on_browser_status)
         self._worker.batch_state.connect(self._on_batch_state)
         self._worker.progress.connect(self._log)
+        self._worker.user_action.connect(self._set_user_action)
         self._worker.row_result.connect(self._on_row_result)
         self._worker.batch_result.connect(self._on_batch_result)
 
@@ -126,13 +140,20 @@ class MainWindow(QWidget):
         help_button = QToolButton()
         help_button.setText("ⓘ")
         help_button.setAccessibleName("输出路径模板说明")
-        help_text = "[id] - 批次序号\n[object] - 查询主体\n[website] - 网站名称\n[date] - 日期 YYMMDD\n[time] - 时间 HHMMSS\n[year] - 年\n[month] - 月\n[day] - 日\n[hour] - 小时\n[minute] - 分钟\n[second] - 秒"
+        help_text = "[id] - 批次序号\n[object] - 查询主体\n[website] - 网站名称\n[date] - 日期 YYMMDD\n[time] - 时间 HHMMSS\n[year] - 年\n[month] - 月\n[day] - 日"
         help_button.setToolTip(help_text)
         help_button.setStyleSheet("QToolButton { border: none; background: transparent; padding: 0; }")
         help_button.clicked.connect(
             lambda: QToolTip.showText(help_button.mapToGlobal(help_button.rect().bottomLeft()), help_text, help_button)
         )
         template_header.addWidget(help_button)
+        open_output_button = QToolButton()
+        open_output_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        open_output_button.setToolTip("打开输出目录")
+        open_output_button.setAccessibleName("打开输出目录")
+        open_output_button.setStyleSheet("QToolButton { border: none; background: transparent; padding: 0; }")
+        open_output_button.clicked.connect(self._open_output_directory)
+        template_header.addWidget(open_output_button)
         template_header.addStretch()
         upper_layout.addLayout(template_header)
         self.template_edit = QLineEdit()
@@ -151,9 +172,16 @@ class MainWindow(QWidget):
         upper_layout.addWidget(self.progress_bar)
         self.progress_bar.hide()
 
+        status_row = QHBoxLayout()
+        self.status_light = QLabel()
+        self.status_light.setFixedSize(12, 12)
+        self.status_light.setAccessibleName("状态指示灯")
+        status_row.addWidget(self.status_light, alignment=Qt.AlignmentFlag.AlignTop)
+        self._set_user_action(False)
         self.status_label = QLabel("正在启动 Chrome…")
         self.status_label.setWordWrap(True)
-        upper_layout.addWidget(self.status_label)
+        status_row.addWidget(self.status_label, 1)
+        upper_layout.addLayout(status_row)
         upper_layout.addStretch(1)
 
         lower = QGroupBox("网页专属配置")
@@ -233,12 +261,13 @@ class MainWindow(QWidget):
             return
         adapter = self._adapters[key]
         saved = self._site_values.get(key, {})
-        pdf_saved = self._site_pdf_values.get(key, self._saved.get("pdf", {}))
+        defaults = adapter.default_pdf_settings
+        pdf_saved = self._site_pdf_values.get(key, {})
         if not isinstance(pdf_saved, dict):
             pdf_saved = {}
-        self.orientation_combo.setCurrentIndex(1 if pdf_saved.get("landscape") else 0)
-        self.scale_spin.setValue(int(pdf_saved.get("scale_percent", 100)))
-        self.background_check.setChecked(bool(pdf_saved.get("print_background", False)))
+        self.orientation_combo.setCurrentIndex(1 if pdf_saved.get("landscape", defaults.landscape) else 0)
+        self.scale_spin.setValue(int(pdf_saved.get("scale_percent", round(defaults.scale * 100))))
+        self.background_check.setChecked(bool(pdf_saved.get("print_background", defaults.print_background)))
         if not isinstance(saved, dict):
             saved = {}
         for spec in adapter.settings_schema:
@@ -285,6 +314,21 @@ class MainWindow(QWidget):
             "site_pdf_settings": self._site_pdf_values,
         })
 
+    def _open_output_directory(self) -> None:
+        try:
+            template = validate_template(self.template_edit.text())
+            subjects = [line.strip() for line in self.subjects_edit.toPlainText().splitlines() if line.strip()]
+            adapter = self._adapters.get(self.site_combo.currentData())
+            website = adapter.display_name if adapter else "网站"
+            directory = OutputPlan(self._output_base, template, datetime.now()).render(
+                1, subjects[0] if subjects else "未命名", website
+            ).parent
+            directory.mkdir(parents=True, exist_ok=True)
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory))):
+                raise OSError(f"无法打开目录：{directory}")
+        except (ValueError, OSError) as exc:
+            QMessageBox.warning(self, "无法打开输出目录", str(exc))
+
     def _start_batch(self) -> None:
         try:
             subjects = tuple(line.strip() for line in self.subjects_edit.toPlainText().splitlines() if line.strip())
@@ -307,6 +351,7 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "无法开始查询", str(exc))
             return
         self._running = True
+        self._last_row_error = ""
         self._total = len(request.subjects)
         self.progress_bar.setRange(0, self._total)
         self.progress_bar.setValue(0)
@@ -329,6 +374,8 @@ class MainWindow(QWidget):
 
     def _on_browser_status(self, ready: bool, message: str) -> None:
         self._browser_error = "" if ready else message
+        if not self._running:
+            self._set_user_action(not ready)
         self._log(message)
         if not self._running:
             self.status_label.setText(message)
@@ -342,9 +389,16 @@ class MainWindow(QWidget):
         self.status_label.setText(message)
         self._log(message)
 
+    def _set_user_action(self, needed: bool) -> None:
+        color = "#e24b4b" if needed else "#36b76c"
+        self.status_light.setStyleSheet(f"background-color: {color}; border-radius: 6px;")
+        self.status_light.setToolTip("需要用户操作" if needed else "无需用户操作")
+
     def _on_row_result(self, index: int, subject: str, success: bool, detail: str) -> None:
         self.progress_bar.setValue(index)
         mark = "完成" if success else "失败"
+        if not success:
+            self._last_row_error = f"{index:03d} {subject}：{detail}"
         self._log(f"{index:03d} {subject}：{mark}。{detail}")
 
     def _on_batch_result(self, successes: int, failures: int, stopped: bool) -> None:
@@ -352,7 +406,8 @@ class MainWindow(QWidget):
         self.progress_bar.hide()
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
-        summary = f"批次{'已停止' if stopped else '完成'}：成功 {successes}，失败 {failures}"
+        summary = format_batch_summary(successes, failures, stopped, self._total, self._last_row_error)
+        self._set_user_action(bool(self._browser_error))
         self.status_label.setText(self._browser_error if stopped and successes == failures == 0 and self._browser_error else summary)
         self._log(summary)
 
