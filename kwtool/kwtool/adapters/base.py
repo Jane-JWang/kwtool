@@ -46,10 +46,13 @@ class RunContext:
 
     def save_pdf(self, page: Page | None = None) -> Path:
         self.check_stop()
+        settings = self.pdf_settings.validated()
         pdf = (page or self.page).pdf(
             format="A4",
+            landscape=settings.landscape,
+            scale=settings.scale,
             display_header_footer=True,
-            print_background=False,
+            print_background=settings.print_background,
             prefer_css_page_size=False,
             margin={"top": "10mm", "right": "10mm", "bottom": "10mm", "left": "10mm"},
         )

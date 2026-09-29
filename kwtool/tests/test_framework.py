@@ -81,6 +81,9 @@ def test_demo_adapter_prints_with_browser_headers(tmp_path: Path) -> None:
     assert "主体 &lt;A&gt;" in page.html
     assert page.pdf_options["display_header_footer"] is True
     assert page.pdf_options["format"] == "A4"
+    assert page.pdf_options["landscape"] is True
+    assert page.pdf_options["scale"] == 0.8
+    assert page.pdf_options["print_background"] is False
     assert artifacts == [tmp_path / "demo.pdf"]
     assert artifacts[0].read_bytes().startswith(b"%PDF")
 

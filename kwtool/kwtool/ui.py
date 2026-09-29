@@ -46,6 +46,8 @@ class MainWindow(QWidget):
         self._saved = load_settings()
         saved_sites = self._saved.get("site_settings", {})
         self._site_values: dict[str, dict] = dict(saved_sites) if isinstance(saved_sites, dict) else {}
+        saved_pdf = self._saved.get("site_pdf_settings", {})
+        self._site_pdf_values: dict[str, dict] = dict(saved_pdf) if isinstance(saved_pdf, dict) else {}
         self._current_site_key: str | None = None
         self._site_widgets: dict[str, QWidget] = {}
         self._closing = False
@@ -142,16 +144,33 @@ class MainWindow(QWidget):
         self.status_label = QLabel("正在启动 Chrome…")
         self.status_label.setWordWrap(True)
         upper_layout.addWidget(self.status_label)
+        upper_layout.addStretch(1)
 
         lower = QWidget()
         lower_layout = QVBoxLayout(lower)
         lower_layout.setContentsMargins(2, 2, 2, 2)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
         lower_layout.addWidget(scroll)
         settings_panel = QWidget()
         settings_layout = QVBoxLayout(settings_panel)
+        settings_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         scroll.setWidget(settings_panel)
+
+        pdf_group = QGroupBox("打印设置")
+        pdf_form = QFormLayout(pdf_group)
+        self.orientation_combo = QComboBox()
+        self.orientation_combo.addItems(["纵向", "横向"])
+        pdf_form.addRow("方向", self.orientation_combo)
+        self.scale_spin = QSpinBox()
+        self.scale_spin.setRange(10, 200)
+        self.scale_spin.setSuffix(" %")
+        self.scale_spin.setValue(100)
+        pdf_form.addRow("缩放", self.scale_spin)
+        self.background_check = QCheckBox("打印背景")
+        pdf_form.addRow(self.background_check)
+        settings_layout.addWidget(pdf_group)
 
         self.site_group = QGroupBox("网站专属打印与查询设置")
         settings_layout.addWidget(QLabel("打印设置可能因网站而异，请按当前网站的要求配置。"))
@@ -161,8 +180,9 @@ class MainWindow(QWidget):
 
         splitter.addWidget(upper)
         splitter.addWidget(lower)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([self.height() * 2 // 3, self.height() // 3])
 
         self.run_button.clicked.connect(self._start_batch)
         self.stop_button.clicked.connect(self._stop_batch)
@@ -189,6 +209,11 @@ class MainWindow(QWidget):
     def _capture_site_fields(self) -> None:
         if self._current_site_key is None:
             return
+        self._site_pdf_values[self._current_site_key] = {
+            "landscape": self.orientation_combo.currentIndex() == 1,
+            "scale_percent": self.scale_spin.value(),
+            "print_background": self.background_check.isChecked(),
+        }
         adapter = self._adapters[self._current_site_key]
         self._site_values[self._current_site_key] = {
             spec.key: self._read_field(spec, self._site_widgets[spec.key])
@@ -206,6 +231,12 @@ class MainWindow(QWidget):
             return
         adapter = self._adapters[key]
         saved = self._site_values.get(key, {})
+        pdf_saved = self._site_pdf_values.get(key, self._saved.get("pdf", {}))
+        if not isinstance(pdf_saved, dict):
+            pdf_saved = {}
+        self.orientation_combo.setCurrentIndex(1 if pdf_saved.get("landscape") else 0)
+        self.scale_spin.setValue(int(pdf_saved.get("scale_percent", 100)))
+        self.background_check.setChecked(bool(pdf_saved.get("print_background", False)))
         if not isinstance(saved, dict):
             saved = {}
         for spec in adapter.settings_schema:
@@ -238,7 +269,11 @@ class MainWindow(QWidget):
         self._current_site_key = key
 
     def _pdf_settings(self) -> PdfSettings:
-        return PdfSettings()
+        return PdfSettings(
+            landscape=self.orientation_combo.currentIndex() == 1,
+            scale=self.scale_spin.value() / 100,
+            print_background=self.background_check.isChecked(),
+        ).validated()
 
     def _save_preferences(self) -> None:
         self._capture_site_fields()
@@ -247,6 +282,7 @@ class MainWindow(QWidget):
             "subjects": self.subjects_edit.toPlainText(),
             "output_template": self.template_edit.text(),
             "site_settings": self._site_values,
+            "site_pdf_settings": self._site_pdf_values,
         })
 
     def _start_batch(self) -> None:
