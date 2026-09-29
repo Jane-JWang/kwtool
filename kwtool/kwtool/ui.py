@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QStandardPaths
+from PySide6.QtCore import Qt, QStandardPaths, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -22,6 +24,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QSplitter,
+    QStyle,
     QToolButton,
     QToolTip,
     QVBoxLayout,
@@ -30,7 +33,7 @@ from PySide6.QtWidgets import (
 
 from kwtool.adapters import registered_adapters
 from kwtool.models import BatchRequest, BrowserLayout, FieldSpec, PdfSettings
-from kwtool.output import validate_template
+from kwtool.output import OutputPlan, validate_template
 from kwtool.preferences import default_template, load_settings, profile_path, save_settings, settings_path
 from kwtool.worker import BrowserWorker
 
@@ -137,13 +140,20 @@ class MainWindow(QWidget):
         help_button = QToolButton()
         help_button.setText("ⓘ")
         help_button.setAccessibleName("输出路径模板说明")
-        help_text = "[id] - 批次序号\n[object] - 查询主体\n[website] - 网站名称\n[date] - 日期 YYMMDD\n[time] - 时间 HHMMSS\n[year] - 年\n[month] - 月\n[day] - 日\n[hour] - 小时\n[minute] - 分钟\n[second] - 秒"
+        help_text = "[id] - 批次序号\n[object] - 查询主体\n[website] - 网站名称\n[date] - 日期 YYMMDD\n[time] - 时间 HHMMSS\n[year] - 年\n[month] - 月\n[day] - 日"
         help_button.setToolTip(help_text)
         help_button.setStyleSheet("QToolButton { border: none; background: transparent; padding: 0; }")
         help_button.clicked.connect(
             lambda: QToolTip.showText(help_button.mapToGlobal(help_button.rect().bottomLeft()), help_text, help_button)
         )
         template_header.addWidget(help_button)
+        open_output_button = QToolButton()
+        open_output_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        open_output_button.setToolTip("打开输出目录")
+        open_output_button.setAccessibleName("打开输出目录")
+        open_output_button.setStyleSheet("QToolButton { border: none; background: transparent; padding: 0; }")
+        open_output_button.clicked.connect(self._open_output_directory)
+        template_header.addWidget(open_output_button)
         template_header.addStretch()
         upper_layout.addLayout(template_header)
         self.template_edit = QLineEdit()
@@ -303,6 +313,21 @@ class MainWindow(QWidget):
             "site_settings": self._site_values,
             "site_pdf_settings": self._site_pdf_values,
         })
+
+    def _open_output_directory(self) -> None:
+        try:
+            template = validate_template(self.template_edit.text())
+            subjects = [line.strip() for line in self.subjects_edit.toPlainText().splitlines() if line.strip()]
+            adapter = self._adapters.get(self.site_combo.currentData())
+            website = adapter.display_name if adapter else "网站"
+            directory = OutputPlan(self._output_base, template, datetime.now()).render(
+                1, subjects[0] if subjects else "未命名", website
+            ).parent
+            directory.mkdir(parents=True, exist_ok=True)
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory))):
+                raise OSError(f"无法打开目录：{directory}")
+        except (ValueError, OSError) as exc:
+            QMessageBox.warning(self, "无法打开输出目录", str(exc))
 
     def _start_batch(self) -> None:
         try:
