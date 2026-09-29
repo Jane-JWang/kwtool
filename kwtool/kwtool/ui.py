@@ -93,6 +93,7 @@ class MainWindow(QWidget):
         self._worker.browser_status.connect(self._on_browser_status)
         self._worker.batch_state.connect(self._on_batch_state)
         self._worker.progress.connect(self._log)
+        self._worker.user_action.connect(self._set_user_action)
         self._worker.row_result.connect(self._on_row_result)
         self._worker.batch_result.connect(self._on_batch_result)
 
@@ -161,9 +162,16 @@ class MainWindow(QWidget):
         upper_layout.addWidget(self.progress_bar)
         self.progress_bar.hide()
 
+        status_row = QHBoxLayout()
+        self.status_light = QLabel()
+        self.status_light.setFixedSize(12, 12)
+        self.status_light.setAccessibleName("状态指示灯")
+        status_row.addWidget(self.status_light, alignment=Qt.AlignmentFlag.AlignTop)
+        self._set_user_action(False)
         self.status_label = QLabel("正在启动 Chrome…")
         self.status_label.setWordWrap(True)
-        upper_layout.addWidget(self.status_label)
+        status_row.addWidget(self.status_label, 1)
+        upper_layout.addLayout(status_row)
         upper_layout.addStretch(1)
 
         lower = QGroupBox("网页专属配置")
@@ -341,6 +349,8 @@ class MainWindow(QWidget):
 
     def _on_browser_status(self, ready: bool, message: str) -> None:
         self._browser_error = "" if ready else message
+        if not self._running:
+            self._set_user_action(not ready)
         self._log(message)
         if not self._running:
             self.status_label.setText(message)
@@ -353,6 +363,11 @@ class MainWindow(QWidget):
     def _on_waiting(self, message: str) -> None:
         self.status_label.setText(message)
         self._log(message)
+
+    def _set_user_action(self, needed: bool) -> None:
+        color = "#e24b4b" if needed else "#36b76c"
+        self.status_light.setStyleSheet(f"background-color: {color}; border-radius: 6px;")
+        self.status_light.setToolTip("需要用户操作" if needed else "无需用户操作")
 
     def _on_row_result(self, index: int, subject: str, success: bool, detail: str) -> None:
         self.progress_bar.setValue(index)
@@ -367,6 +382,7 @@ class MainWindow(QWidget):
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         summary = format_batch_summary(successes, failures, stopped, self._total, self._last_row_error)
+        self._set_user_action(bool(self._browser_error))
         self.status_label.setText(self._browser_error if stopped and successes == failures == 0 and self._browser_error else summary)
         self._log(summary)
 

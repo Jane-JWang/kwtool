@@ -81,9 +81,11 @@ class GsxtAdapter(SiteAdapter):
                 ready = _site_page(page) and _visible(page, SEARCH_INPUT)
                 login_needed = _login_required(page)
                 if ready and not login_needed:
+                    context.report_user_action(False)
                     return page
                 if login_needed and not last_login_notice:
                     context.report_status("企信网尚未登录，请在 Chrome 中登录；完成后将自动继续…")
+                    context.report_user_action(True)
                     last_login_notice = True
                     deadline = time.monotonic() + 600
             except PlaywrightError:
@@ -109,7 +111,7 @@ class GsxtAdapter(SiteAdapter):
             text = _body_text(page)
             return any(marker in text for marker in ("暂无查询结果", "未查询到相关企业", "没有找到相关企业"))
 
-        context.wait_until(results_ready, "请完成搜索验证码；等待搜索结果…", timeout_seconds=600)
+        context.wait_until(results_ready, "请完成搜索验证码；等待搜索结果…", timeout_seconds=600, user_action=True)
         detail = _detail_page(context, page, prior_pages)
         if detail:
             return detail
@@ -132,6 +134,7 @@ class GsxtAdapter(SiteAdapter):
             lambda: _detail_page(context, page, prior_pages) is not None,
             "等待你在右侧网页选择企业…",
             timeout_seconds=600,
+            user_action=True,
         )
         detail = _detail_page(context, page, prior_pages)
         assert detail is not None
@@ -182,6 +185,7 @@ class GsxtAdapter(SiteAdapter):
                 lambda: _visible(page, "#send_pdf_dialog") or SUCCESS_TEXT in _body_text(page),
                 "请在 Chrome 中完成发送报告验证码…",
                 timeout_seconds=600,
+                user_action=True,
             )
             if SUCCESS_TEXT not in _body_text(page):
                 send = page.locator("#send_pdf_dialog").get_by_text("发送", exact=True).first

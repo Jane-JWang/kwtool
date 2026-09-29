@@ -39,23 +39,31 @@ class RunContext:
     stop_event: Event
     report_status: Callable[[str], None]
     artifacts: list[Path]
+    report_user_action: Callable[[bool], None] = lambda _needed: None
 
     def check_stop(self) -> None:
         if self.stop_event.is_set():
             raise RunCancelled()
 
-    def wait_until(self, ready: Callable[[], bool], message: str, timeout_seconds: float = 300) -> None:
+    def wait_until(self, ready: Callable[[], bool], message: str, timeout_seconds: float = 300,
+                   user_action: bool = False) -> None:
         """Wait for a site-specific completion signal, while allowing cancellation."""
         import time
 
         self.report_status(message)
+        if user_action:
+            self.report_user_action(True)
         deadline = time.monotonic() + timeout_seconds
-        while not ready():
+        try:
+            while not ready():
+                self.check_stop()
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(message)
+                time.sleep(0.25)
             self.check_stop()
-            if time.monotonic() >= deadline:
-                raise TimeoutError(message)
-            time.sleep(0.25)
-        self.check_stop()
+        finally:
+            if user_action:
+                self.report_user_action(False)
 
     def save_pdf(self, page: Page | None = None, *, margin: dict[str, str] | None = None) -> Path:
         self.check_stop()

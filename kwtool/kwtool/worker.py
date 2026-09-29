@@ -24,6 +24,7 @@ class BrowserWorker(QThread):
     browser_status = Signal(bool, str)
     batch_state = Signal(str)
     progress = Signal(str)
+    user_action = Signal(bool)
     row_result = Signal(int, str, bool, str)
     batch_result = Signal(int, int, bool)
 
@@ -138,6 +139,7 @@ class BrowserWorker(QThread):
         stopped = False
         browser_closed = False
         self.batch_state.emit("running")
+        self.user_action.emit(False)
         for index, subject in enumerate(request.subjects, 1):
             if self._stop.is_set() or self._shutdown.is_set():
                 stopped = True
@@ -155,6 +157,7 @@ class BrowserWorker(QThread):
                     stop_event=self._stop,
                     report_status=self.progress.emit,
                     artifacts=artifacts,
+                    report_user_action=self.user_action.emit,
                 )
                 adapter.run_one(run, subject)
                 run.check_stop()
@@ -179,6 +182,7 @@ class BrowserWorker(QThread):
                     stopped = True
                     break
         self.batch_state.emit("idle")
+        self.user_action.emit(False)
         self.batch_result.emit(successes, failures, stopped)
         return browser_closed
 

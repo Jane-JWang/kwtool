@@ -116,6 +116,26 @@ def test_stop_interrupts_manual_step(tmp_path: Path) -> None:
     assert not (tmp_path / "stopped.pdf").exists()
 
 
+def test_user_action_indicator_resets_after_wait(tmp_path: Path) -> None:
+    states: list[bool] = []
+    context = RunContext(
+        browser=None,  # type: ignore[arg-type]
+        page=FakePage(),  # type: ignore[arg-type]
+        pdf_path=tmp_path / "unused.pdf",
+        pdf_settings=PdfSettings(),
+        site_settings={},
+        stop_event=Event(),
+        report_status=lambda _: None,
+        artifacts=[],
+        report_user_action=states.append,
+    )
+    context.wait_until(lambda: True, "等待用户", user_action=True)
+    assert states == [True, False]
+    with pytest.raises(TimeoutError):
+        context.wait_until(lambda: False, "等待超时", timeout_seconds=0, user_action=True)
+    assert states == [True, False, True, False]
+
+
 def test_gsxt_is_registered_with_site_only_pdf_defaults() -> None:
     adapters = registered_adapters()
     assert isinstance(adapters["gsxt"], GsxtAdapter)
