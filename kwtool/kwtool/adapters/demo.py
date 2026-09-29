@@ -3,19 +3,16 @@ from __future__ import annotations
 from html import escape
 
 from kwtool.adapters.base import RunContext, SiteAdapter
-from kwtool.models import FieldSpec
 
 
 class DemoAdapter(SiteAdapter):
     key = "demo"
     display_name = "本地演示"
-    settings_schema = (
-        FieldSpec("page_title", "页面标题", "text", "网络核查演示"),
-    )
+    settings_schema = ()
 
     def run_one(self, context: RunContext, subject: str) -> None:
         context.check_stop()
-        title = str(context.site_settings.get("page_title", "网络核查演示"))
+        title = "网络核查演示"
         context.page.set_content(
             "<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'>"
             f"<title>{escape(title)}</title>"

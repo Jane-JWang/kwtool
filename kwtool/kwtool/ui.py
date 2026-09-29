@@ -169,9 +169,6 @@ class MainWindow(QWidget):
         self.site_form.setContentsMargins(0, 0, 0, 0)
         scroll.setWidget(settings_panel)
 
-        note = QLabel("打印参数仅用于当前网站，其他网站可分别配置。")
-        note.setWordWrap(True)
-        self.site_form.addRow(note)
         self.orientation_combo = QComboBox()
         self.orientation_combo.addItems(["纵向", "横向"])
         self.site_form.addRow("方向", self.orientation_combo)
@@ -227,8 +224,8 @@ class MainWindow(QWidget):
 
     def _render_site_fields(self) -> None:
         self._capture_site_fields()
-        while self.site_form.rowCount() > 4:
-            self.site_form.removeRow(4)
+        while self.site_form.rowCount() > 3:
+            self.site_form.removeRow(3)
         self._site_widgets = {}
         key = self.site_combo.currentData()
         if key not in self._adapters:
@@ -269,8 +266,6 @@ class MainWindow(QWidget):
                 widget = QLineEdit(str(value))
                 self.site_form.addRow(spec.label, widget)
             self._site_widgets[spec.key] = widget
-        if not adapter.settings_schema:
-            self.site_form.addRow(QLabel("此网站暂无专属设置"))
         self._current_site_key = key
 
     def _pdf_settings(self) -> PdfSettings:
