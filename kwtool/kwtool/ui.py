@@ -40,6 +40,15 @@ def documents_base() -> Path:
     return Path(documents) / "kwtool" if documents else Path.home() / "Documents" / "kwtool"
 
 
+def format_batch_summary(successes: int, failures: int, stopped: bool, total: int, last_error: str) -> str:
+    summary = f"批次{'已停止' if stopped else '完成'}：成功 {successes}，失败 {failures}"
+    if stopped and total > successes + failures:
+        summary += f"，未处理 {total - successes - failures}"
+    if last_error:
+        summary += f"\n最近失败：{last_error}"
+    return summary
+
+
 class MainWindow(QWidget):
     def __init__(self) -> None:
         super().__init__()
@@ -55,6 +64,7 @@ class MainWindow(QWidget):
         self._closing = False
         self._close_connected = False
         self._running = False
+        self._last_row_error = ""
         self._browser_error = ""
         self._output_base = documents_base()
         log_path = settings_path().parent / "kwtool.log"
@@ -233,12 +243,13 @@ class MainWindow(QWidget):
             return
         adapter = self._adapters[key]
         saved = self._site_values.get(key, {})
-        pdf_saved = self._site_pdf_values.get(key, self._saved.get("pdf", {}))
+        defaults = adapter.default_pdf_settings
+        pdf_saved = self._site_pdf_values.get(key, {})
         if not isinstance(pdf_saved, dict):
             pdf_saved = {}
-        self.orientation_combo.setCurrentIndex(1 if pdf_saved.get("landscape") else 0)
-        self.scale_spin.setValue(int(pdf_saved.get("scale_percent", 100)))
-        self.background_check.setChecked(bool(pdf_saved.get("print_background", False)))
+        self.orientation_combo.setCurrentIndex(1 if pdf_saved.get("landscape", defaults.landscape) else 0)
+        self.scale_spin.setValue(int(pdf_saved.get("scale_percent", round(defaults.scale * 100))))
+        self.background_check.setChecked(bool(pdf_saved.get("print_background", defaults.print_background)))
         if not isinstance(saved, dict):
             saved = {}
         for spec in adapter.settings_schema:
@@ -307,6 +318,7 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "无法开始查询", str(exc))
             return
         self._running = True
+        self._last_row_error = ""
         self._total = len(request.subjects)
         self.progress_bar.setRange(0, self._total)
         self.progress_bar.setValue(0)
@@ -345,6 +357,8 @@ class MainWindow(QWidget):
     def _on_row_result(self, index: int, subject: str, success: bool, detail: str) -> None:
         self.progress_bar.setValue(index)
         mark = "完成" if success else "失败"
+        if not success:
+            self._last_row_error = f"{index:03d} {subject}：{detail}"
         self._log(f"{index:03d} {subject}：{mark}。{detail}")
 
     def _on_batch_result(self, successes: int, failures: int, stopped: bool) -> None:
@@ -352,7 +366,7 @@ class MainWindow(QWidget):
         self.progress_bar.hide()
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
-        summary = f"批次{'已停止' if stopped else '完成'}：成功 {successes}，失败 {failures}"
+        summary = format_batch_summary(successes, failures, stopped, self._total, self._last_row_error)
         self.status_label.setText(self._browser_error if stopped and successes == failures == 0 and self._browser_error else summary)
         self._log(summary)
 
