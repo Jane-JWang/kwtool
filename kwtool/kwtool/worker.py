@@ -131,6 +131,28 @@ class BrowserWorker(QThread):
         self.browser_status.emit(True, "已连接 Chrome")
         return context
 
+    def _browser_usable(self, context: BrowserContext | None) -> bool:
+        if context is None or self._connected_browser is None or not self._connected_browser.is_connected():
+            return False
+        if self._chrome_process is not None and self._chrome_process.poll() is not None:
+            return False
+        try:
+            return any(not page.is_closed() for page in context.pages)
+        except PlaywrightError:
+            return False
+
+    def _ensure_browser(self, playwright, context: BrowserContext | None) -> BrowserContext:
+        if self._browser_usable(context):
+            return context  # type: ignore[return-value]
+        self.browser_status.emit(False, "Chrome 已关闭，正在重新启动…")
+        if self._connected_browser is not None:
+            try:
+                self._connected_browser.close()
+            except PlaywrightError:
+                pass
+            self._connected_browser = None
+        return self._launch(playwright)
+
     def _run_batch(self, browser: BrowserContext, request: BatchRequest) -> bool:
         adapter = registered_adapters()[request.site_key]
         output = OutputPlan(self._output_base, request.output_template, datetime.now())
@@ -198,29 +220,16 @@ class BrowserWorker(QThread):
                     try:
                         request = self._commands.get(timeout=0.2)
                     except queue.Empty:
-                        if browser is not None:
-                            try:
-                                if not browser.pages:
-                                    browser.new_page()
-                                    self.browser_status.emit(True, "Chrome 页面已恢复")
-                            except PlaywrightError:
-                                browser = None
-                        if browser is None and self._chrome_process is not None and self._chrome_process.poll() is not None:
-                            try:
-                                browser = self._launch(playwright)
-                            except Exception as exc:
-                                self.browser_status.emit(False, f"无法重新启动 Chrome：{exc}")
-                                time.sleep(2)
                         continue
                     if request is None:
                         continue
-                    if browser is None:
-                        try:
-                            browser = self._launch(playwright)
-                        except Exception as exc:
-                            self.browser_status.emit(False, f"无法启动 Chrome：{exc}")
-                            self.batch_result.emit(0, 0, True)
-                            continue
+                    try:
+                        browser = self._ensure_browser(playwright, browser)
+                    except Exception as exc:
+                        browser = None
+                        self.browser_status.emit(False, f"无法重新启动 Chrome：{exc}")
+                        self.batch_result.emit(0, 0, True)
+                        continue
                     try:
                         browser_closed = self._run_batch(browser, request)
                         if browser_closed:
@@ -230,12 +239,6 @@ class BrowserWorker(QThread):
                         self.progress.emit(f"批次执行失败：{exc}")
                         self.batch_state.emit("idle")
                         self.batch_result.emit(0, 0, True)
-                    if browser is not None:
-                        try:
-                            if not browser.pages:
-                                browser.new_page()
-                        except PlaywrightError:
-                            browser = None
                 if self._connected_browser is not None:
                     try:
                         self._connected_browser.close()

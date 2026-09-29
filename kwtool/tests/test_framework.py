@@ -136,6 +136,34 @@ def test_user_action_indicator_resets_after_wait(tmp_path: Path) -> None:
     assert states == [True, False, True, False]
 
 
+def test_closed_chrome_is_relaunched_before_next_batch(tmp_path: Path, monkeypatch) -> None:
+    worker = BrowserWorker(tmp_path / "profile", tmp_path, BrowserLayout(0, 0, 800, 600))
+    class BrowserConnection:
+        connected = False
+
+        def is_connected(self) -> bool:
+            return self.connected
+
+        def close(self) -> None:
+            pass
+
+    class Context:
+        pages = []
+
+    old_context = Context()
+    new_context = Context()
+    connection = BrowserConnection()
+    worker._connected_browser = connection  # type: ignore[assignment]
+    launched: list[bool] = []
+    monkeypatch.setattr(worker, "_launch", lambda _: launched.append(True) or new_context)
+    assert worker._ensure_browser(object(), old_context) is new_context  # type: ignore[arg-type]
+    assert launched == [True]
+    connection.connected = True
+    worker._connected_browser = connection  # type: ignore[assignment]
+    assert worker._ensure_browser(object(), old_context) is new_context  # type: ignore[arg-type]
+    assert launched == [True, True]
+
+
 def test_gsxt_is_registered_with_site_only_pdf_defaults() -> None:
     adapters = registered_adapters()
     assert isinstance(adapters["gsxt"], GsxtAdapter)
