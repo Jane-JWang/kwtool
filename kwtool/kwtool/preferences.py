@@ -13,6 +13,9 @@ def settings_path() -> Path:
 
 
 def profile_path() -> Path:
+    override = os.environ.get("KWTOOL_PROFILE_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
     local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
     return local / "kwtool" / "chrome-profile"
 
