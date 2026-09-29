@@ -89,3 +89,77 @@ def test_gsxt_local_browser_flow(tmp_path: Path, subject: str, search_html: str,
             browser.close()
     finally:
         playwright.stop()
+
+
+def test_gsxt_batch_restarts_search_and_closes_detail_tabs(tmp_path: Path) -> None:
+    playwright = sync_playwright().start()
+    try:
+        try:
+            browser = playwright.chromium.launch(channel="chrome", headless=True)
+        except OSError:
+            pytest.skip("Chrome 不可用")
+        try:
+            browser_context = browser.new_context()
+            search_page = browser_context.new_page()
+            home_visits: list[str] = []
+
+            def fulfill(route) -> None:
+                parsed = urlparse(route.request.url)
+                if parsed.path == "/":
+                    home_visits.append(route.request.url)
+                    body = """<input id="keyword"><button id="btn_query" onclick="search()">查询</button>
+                        <div id="captcha" style="display:none">请完成验证码</div><div id="results"></div>
+                        <script>function search() {
+                          const name = document.querySelector('#keyword').value;
+                          document.querySelector('#captcha').style.display = 'block';
+                          setTimeout(() => {
+                            document.querySelector('#results').innerHTML =
+                              '<a class="search_list_item" target="_blank" href="/detail?name=' +
+                              encodeURIComponent(name) + '"><h1>' + name + '</h1></a>';
+                            document.querySelector('#captcha').style.display = 'none';
+                          }, 400);
+                        }</script>"""
+                elif parsed.path == "/detail":
+                    body = DETAIL_HTML
+                else:
+                    route.abort()
+                    return
+                route.fulfill(status=200, content_type="text/html; charset=utf-8", body=body)
+
+            browser_context.route("https://www.gsxt.gov.cn/**", fulfill)
+            messages: list[str] = []
+            send_counts: list[int] = []
+
+            class RecordingAdapter(GsxtAdapter):
+                def _send_report(self, context, page) -> None:
+                    super()._send_report(context, page)
+                    send_counts.append(page.evaluate("window.__sends"))
+
+            for subject in ("测试企业甲", "测试企业乙"):
+                adapter = RecordingAdapter()  # A later batch gets a fresh adapter, but keeps the tab.
+                run = RunContext(
+                    browser=browser_context,
+                    page=search_page,
+                    pdf_path=tmp_path / f"{subject}.pdf",
+                    pdf_settings=adapter.default_pdf_settings,
+                    site_settings={"column_delay_ms": 150},
+                    stop_event=Event(),
+                    report_status=messages.append,
+                    artifacts=[],
+                )
+                adapter.run_one(run, subject)
+                assert run.artifacts == [tmp_path / f"{subject}.pdf"]
+                assert run.page is search_page
+                assert browser_context.pages == [search_page]
+                assert search_page.locator("#keyword").input_value() == subject
+                assert search_page.locator(".search_list_item h1").inner_text() == subject
+
+            assert len(home_visits) == 1
+            assert send_counts == [1, 1]
+            assert sum("等待本轮搜索结果" in message for message in messages) == 2
+            assert not any("请在右侧网页选择企业" in message for message in messages)
+            assert sum("等待自动打开企业详情页" in message for message in messages) == 2
+        finally:
+            browser.close()
+    finally:
+        playwright.stop()

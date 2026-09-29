@@ -57,6 +57,48 @@ def _detail_page(context: RunContext, search_page: Page, prior_pages: set[Page])
     return None
 
 
+def _watch_search_results(page: Page, token: int) -> None:
+    """Track replacement of the current results while a new search is pending."""
+    page.evaluate("""token => {
+        const selector = 'a.search_list_item';
+        const emptyTexts = ['暂无查询结果', '未查询到相关企业', '没有找到相关企业'];
+        const links = [...document.querySelectorAll(selector)];
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        const emptyNodes = [];
+        while (walker.nextNode()) {
+            if (emptyTexts.some(text => walker.currentNode.textContent.includes(text)))
+                emptyNodes.push(walker.currentNode.parentElement);
+        }
+        const watch = {token, changed: links.length === 0 && emptyNodes.length === 0};
+        const relevant = node => {
+            const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+            return element && (
+                element.matches?.(selector) || element.querySelector?.(selector) ||
+                links.some(link => link === element || link.contains(element) || element.contains(link)) ||
+                emptyNodes.some(empty => empty === element || empty.contains(element) || element.contains(empty))
+            );
+        };
+        const observer = new MutationObserver(mutations => {
+            if (mutations.some(mutation =>
+                (mutation.target !== document.body && relevant(mutation.target) && mutation.type !== 'childList') ||
+                [...mutation.addedNodes, ...mutation.removedNodes].some(relevant)
+            )) watch.changed = true;
+        });
+        observer.observe(document.body, {subtree: true, childList: true, attributes: true, characterData: true});
+        watch.stop = () => observer.disconnect();
+        window.__kwtoolSearchWatch?.stop();
+        window.__kwtoolSearchWatch = watch;
+    }""", token)
+
+
+def _search_results_changed(page: Page, token: int) -> bool:
+    return page.evaluate("token => window.__kwtoolSearchWatch?.token !== token || window.__kwtoolSearchWatch.changed", token)
+
+
+def _stop_search_watch(page: Page, token: int) -> None:
+    page.evaluate("token => { if (window.__kwtoolSearchWatch?.token === token) window.__kwtoolSearchWatch.stop(); }", token)
+
+
 class GsxtAdapter(SiteAdapter):
     key = "gsxt"
     display_name = "企信网"
@@ -66,13 +108,20 @@ class GsxtAdapter(SiteAdapter):
     def _search_page(self, context: RunContext) -> Page:
         page = context.page
         status = None
-        if not _site_page(page):
-            try:
+        try:
+            if _site_page(page) and page.locator(DETAIL_ITEM).count():
+                page.go_back(wait_until="commit", timeout=15000)
+            if not _site_page(page):
                 response = page.goto(HOME, wait_until="commit", timeout=60000)
                 status = response.status if response else None
-            except PlaywrightError as exc:
-                raise SiteUnavailable(f"无法打开企信网：{exc}") from exc
-        context.report_status("等待企信网完成环境检查；如需登录，请在 Chrome 中操作…")
+        except PlaywrightError as exc:
+            raise SiteUnavailable(f"无法打开企信网：{exc}") from exc
+        try:
+            search_ready = _visible(page, SEARCH_INPUT)
+        except PlaywrightError:
+            search_ready = False
+        if not search_ready:
+            context.report_status("等待企信网完成环境检查；如需登录，请在 Chrome 中操作…")
         deadline = time.monotonic() + 180
         last_login_notice = False
         while True:
@@ -100,18 +149,28 @@ class GsxtAdapter(SiteAdapter):
         page = self._search_page(context)
         prior_pages = set(context.browser.pages)
         page.locator(SEARCH_INPUT).first.fill(subject)
+        watch_token = time.monotonic_ns()
+        _watch_search_results(page, watch_token)
         context.report_status(f"正在搜索：{subject}；如出现验证码，请在 Chrome 中完成")
-        page.locator(SEARCH_BUTTON).first.click()
+        try:
+            page.locator(SEARCH_BUTTON).first.click()
 
-        def results_ready() -> bool:
-            if _visible(page, RESULT_LINK):
-                return True
-            if _detail_page(context, page, prior_pages):
-                return True
-            text = _body_text(page)
-            return any(marker in text for marker in ("暂无查询结果", "未查询到相关企业", "没有找到相关企业"))
+            def results_ready() -> bool:
+                if _detail_page(context, page, prior_pages):
+                    return True
+                if not _search_results_changed(page, watch_token):
+                    return False
+                if _visible(page, RESULT_LINK):
+                    return True
+                text = _body_text(page)
+                return any(marker in text for marker in ("暂无查询结果", "未查询到相关企业", "没有找到相关企业"))
 
-        context.wait_until(results_ready, "请完成搜索验证码；等待搜索结果…", timeout_seconds=600, user_action=True)
+            context.wait_until(results_ready, "如出现搜索验证码，请完成；等待本轮搜索结果…", timeout_seconds=600, user_action=True)
+        finally:
+            try:
+                _stop_search_watch(page, watch_token)
+            except PlaywrightError:
+                pass  # The search may have navigated to a new document.
         detail = _detail_page(context, page, prior_pages)
         if detail:
             return detail
@@ -126,15 +185,20 @@ class GsxtAdapter(SiteAdapter):
         exact = [item for item in candidates if item[0] == subject]
         if len(exact) == 1:
             index = candidates.index(exact[0])
+            context.report_status(f"已找到唯一完全匹配的企业：{subject}；正在进入详情页…")
             links.nth(index).click()
+            wait_message = "等待自动打开企业详情页…"
+            user_action = False
         else:
             names = "、".join(name for name, _ in candidates[:8])
             context.report_status(f"{subject} 没有唯一完全匹配项，请在右侧网页选择企业。候选：{names}")
+            wait_message = "等待你在右侧网页选择企业…"
+            user_action = True
         context.wait_until(
             lambda: _detail_page(context, page, prior_pages) is not None,
-            "等待你在右侧网页选择企业…",
+            wait_message,
             timeout_seconds=600,
-            user_action=True,
+            user_action=user_action,
         )
         detail = _detail_page(context, page, prior_pages)
         assert detail is not None
@@ -215,9 +279,22 @@ class GsxtAdapter(SiteAdapter):
 
     def run_one(self, context: RunContext, subject: str) -> None:
         context.check_stop()
-        page = self._find_company(context, subject)
-        context.page = page
-        self._load_columns(context, page)
-        saved = context.save_pdf(page, margin={"top": "10.16mm", "right": "6.35mm", "bottom": "10.16mm", "left": "6.35mm"})
-        context.report_status(f"已保存 PDF：{saved}；正在发送邮件报告")
-        self._send_report(context, page)
+        search_page = context.page
+        detail_page: Page | None = None
+        try:
+            detail_page = self._find_company(context, subject)
+            context.page = detail_page
+            self._load_columns(context, detail_page)
+            saved = context.save_pdf(detail_page, margin={"top": "10.16mm", "right": "6.35mm", "bottom": "10.16mm", "left": "6.35mm"})
+            context.report_status(f"已保存 PDF：{saved}；正在发送邮件报告")
+            self._send_report(context, detail_page)
+        finally:
+            context.page = search_page
+            if detail_page is not None and detail_page is not search_page:
+                try:
+                    if not detail_page.is_closed():
+                        detail_page.close()
+                    if not search_page.is_closed():
+                        search_page.bring_to_front()
+                except PlaywrightError:
+                    pass  # Chrome may have been closed by the user.
