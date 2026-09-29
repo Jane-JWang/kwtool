@@ -13,13 +13,13 @@ python -m pip install -e '.[dev]'
 python launcher.py
 ```
 
-演示时，在左侧每行输入一个主体，选择“本地演示”，点击“查询”。右侧出现演示页后点击左侧“继续”，程序会打印 PDF 并处理下一行。“停止”会在当前浏览器操作结束后终止批次。
+演示时，在左侧每行输入一个主体，选择“本地演示”，点击“查询”。程序自动打印 PDF 并处理下一行。“停止”会在当前浏览器操作结束后终止批次。界面显示进度和状态，详细日志写入 `%APPDATA%\kwtool\kwtool.log`。
 
-默认输出模板为 `Output/[date]/[id]-[object]-[website].pdf`。相对路径基于用户“文档/kwtool”；`[date]` 为本地日期 `YYMMDD`，`[id]` 为从 `001` 开始的行序号。绝对路径也可使用。已有文件会自动增加 `_2`、`_3` 等后缀。Chrome 专用资料保存在 `%LOCALAPPDATA%\kwtool\chrome-profile`，界面设置保存在 `%APPDATA%\kwtool\settings.json`。不要用日常 Chrome 的资料目录替换专用目录。
+默认输出模板为 `Output/[date]/[id]-[object]-[website].pdf`。相对路径基于用户“文档/kwtool”；支持 `[date]`（YYMMDD）、`[time]`（HHMMSS）、`[year]`、`[month]`、`[day]`、`[hour]`、`[minute]`、`[second]`、`[id]`（批次序号）、`[object]`、`[website]`。绝对路径也可使用。已有文件会自动增加 `_2`、`_3` 等后缀。Chrome 专用资料保存在 `%LOCALAPPDATA%\kwtool\chrome-profile`，界面设置保存在 `%APPDATA%\kwtool\settings.json`。
 
 ## 新增网站
 
-在 `kwtool/adapters/` 新建 `SiteAdapter` 子类，实现 `run_one(context, subject)`，并在 `kwtool/adapters/__init__.py` 的 `registered_adapters()` 中注册。适配器通过 `settings_schema` 声明网站专属设置；`context.page` 用于浏览器操作，`context.wait_for_user(message)` 用于人工完成验证码，`context.save_pdf()` 和 `context.save_download(download)` 用于保存结果。长流程应定期调用 `context.check_stop()`。界面与批次执行器无需为新网站改代码。
+在 `kwtool/adapters/` 新建 `SiteAdapter` 子类，实现 `run_one(context, subject)`，并在 `kwtool/adapters/__init__.py` 的 `registered_adapters()` 中注册。适配器通过 `settings_schema` 声明网站专属设置；打印设置可能因网站而异，应由对应适配器处理。`context.page` 用于浏览器操作，`context.wait_until(ready, message)` 可根据网站状态检测验证码完成后自动继续，`context.save_pdf()` 和 `context.save_download(download)` 用于保存结果。长流程应定期调用 `context.check_stop()`。
 
 ## 测试和打包
 

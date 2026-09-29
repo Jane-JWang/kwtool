@@ -63,10 +63,9 @@ def test_attachments_keep_extension_and_avoid_collisions(tmp_path: Path) -> None
     assert first.parent.name == "001-主体-网站_附件"
 
 
-def test_demo_adapter_waits_and_prints_with_selected_options(tmp_path: Path) -> None:
+def test_demo_adapter_prints_with_browser_headers(tmp_path: Path) -> None:
     page = FakePage()
     messages: list[str] = []
-    prompts: list[str] = []
     artifacts: list[Path] = []
     context = RunContext(
         browser=None,  # type: ignore[arg-type]
@@ -76,14 +75,12 @@ def test_demo_adapter_waits_and_prints_with_selected_options(tmp_path: Path) -> 
         site_settings={"manual_step": True, "page_title": "检查结果"},
         stop_event=Event(),
         report_status=messages.append,
-        request_user_continue=prompts.append,
         artifacts=artifacts,
     )
     DemoAdapter().run_one(context, "主体 <A>")
     assert "主体 &lt;A&gt;" in page.html
-    assert len(prompts) == 1
-    assert page.pdf_options["landscape"] is True
-    assert page.pdf_options["scale"] == 0.8
+    assert page.pdf_options["display_header_footer"] is True
+    assert page.pdf_options["format"] == "A4"
     assert artifacts == [tmp_path / "demo.pdf"]
     assert artifacts[0].read_bytes().startswith(b"%PDF")
 
@@ -99,7 +96,6 @@ def test_stop_interrupts_manual_step(tmp_path: Path) -> None:
         site_settings={},
         stop_event=stop,
         report_status=lambda _: None,
-        request_user_continue=lambda _: None,
         artifacts=[],
     )
     with pytest.raises(RunCancelled):

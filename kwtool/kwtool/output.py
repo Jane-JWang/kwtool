@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 TOKEN = re.compile(r"\[([^\[\]]+)\]")
 INVALID = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
-ALLOWED_TOKENS = {"date", "id", "object", "website"}
+ALLOWED_TOKENS = {"date", "time", "year", "month", "day", "hour", "minute", "second", "id", "object", "website"}
 
 
 def safe_filename(value: str, *, limit: int = 80) -> str:
@@ -62,6 +62,13 @@ class OutputPlan:
     def render(self, index: int, subject: str, website: str) -> Path:
         values = {
             "date": self.created_at.strftime("%y%m%d"),
+            "time": self.created_at.strftime("%H%M%S"),
+            "year": self.created_at.strftime("%Y"),
+            "month": self.created_at.strftime("%m"),
+            "day": self.created_at.strftime("%d"),
+            "hour": self.created_at.strftime("%H"),
+            "minute": self.created_at.strftime("%M"),
+            "second": self.created_at.strftime("%S"),
             "id": f"{index:03d}",
             "object": safe_filename(subject),
             "website": safe_filename(website),
