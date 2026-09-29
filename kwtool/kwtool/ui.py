@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 import logging
 import tempfile
 from pathlib import Path
@@ -11,6 +10,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QSplitter,
+    QToolButton,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -104,9 +106,9 @@ class MainWindow(QWidget):
         splitter = QSplitter(Qt.Orientation.Vertical)
         root.addWidget(splitter)
 
-        upper = QWidget()
+        upper = QGroupBox("查询")
         upper_layout = QVBoxLayout(upper)
-        upper_layout.setContentsMargins(2, 2, 2, 2)
+        upper_layout.setContentsMargins(12, 12, 12, 12)
         upper_layout.addWidget(QLabel("网站"))
         self.site_combo = QComboBox()
         for adapter in self._adapters.values():
@@ -121,9 +123,16 @@ class MainWindow(QWidget):
 
         template_header = QHBoxLayout()
         template_header.addWidget(QLabel("输出路径模板"))
-        help_label = QLabel("ⓘ")
-        help_label.setToolTip("[id] - 批次序号\n[object] - 查询主体\n[website] - 网站名称\n[date] - 日期 YYMMDD\n[time] - 时间 HHMMSS\n[year] - 年\n[month] - 月\n[day] - 日\n[hour] - 小时\n[minute] - 分钟\n[second] - 秒")
-        template_header.addWidget(help_label)
+        help_button = QToolButton()
+        help_button.setText("ⓘ")
+        help_button.setAccessibleName("输出路径模板说明")
+        help_text = "[id] - 批次序号\n[object] - 查询主体\n[website] - 网站名称\n[date] - 日期 YYMMDD\n[time] - 时间 HHMMSS\n[year] - 年\n[month] - 月\n[day] - 日\n[hour] - 小时\n[minute] - 分钟\n[second] - 秒"
+        help_button.setToolTip(help_text)
+        help_button.setStyleSheet("QToolButton { border: none; background: transparent; padding: 0; }")
+        help_button.clicked.connect(
+            lambda: QToolTip.showText(help_button.mapToGlobal(help_button.rect().bottomLeft()), help_text, help_button)
+        )
+        template_header.addWidget(help_button)
         template_header.addStretch()
         upper_layout.addLayout(template_header)
         self.template_edit = QLineEdit()
@@ -140,43 +149,39 @@ class MainWindow(QWidget):
         self.progress_bar = QProgressBar()
         self.progress_bar.setFormat("%v of %m")
         upper_layout.addWidget(self.progress_bar)
+        self.progress_bar.hide()
 
         self.status_label = QLabel("正在启动 Chrome…")
         self.status_label.setWordWrap(True)
         upper_layout.addWidget(self.status_label)
         upper_layout.addStretch(1)
 
-        lower = QWidget()
+        lower = QGroupBox("网页专属配置")
         lower_layout = QVBoxLayout(lower)
-        lower_layout.setContentsMargins(2, 2, 2, 2)
+        lower_layout.setContentsMargins(12, 12, 12, 12)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         lower_layout.addWidget(scroll)
         settings_panel = QWidget()
-        settings_layout = QVBoxLayout(settings_panel)
-        settings_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.site_form = QFormLayout(settings_panel)
+        self.site_form.setContentsMargins(0, 0, 0, 0)
         scroll.setWidget(settings_panel)
 
-        pdf_group = QGroupBox("打印设置")
-        pdf_form = QFormLayout(pdf_group)
+        note = QLabel("打印参数仅用于当前网站，其他网站可分别配置。")
+        note.setWordWrap(True)
+        self.site_form.addRow(note)
         self.orientation_combo = QComboBox()
         self.orientation_combo.addItems(["纵向", "横向"])
-        pdf_form.addRow("方向", self.orientation_combo)
+        self.site_form.addRow("方向", self.orientation_combo)
         self.scale_spin = QSpinBox()
         self.scale_spin.setRange(10, 200)
         self.scale_spin.setSuffix(" %")
         self.scale_spin.setValue(100)
-        pdf_form.addRow("缩放", self.scale_spin)
+        self.site_form.addRow("缩放", self.scale_spin)
         self.background_check = QCheckBox("打印背景")
-        pdf_form.addRow(self.background_check)
-        settings_layout.addWidget(pdf_group)
-
-        self.site_group = QGroupBox("网站专属打印与查询设置")
-        settings_layout.addWidget(QLabel("打印设置可能因网站而异，请按当前网站的要求配置。"))
-        self.site_form = QFormLayout(self.site_group)
-        settings_layout.addWidget(self.site_group)
-        settings_layout.addStretch()
+        self.site_form.addRow(self.background_check)
 
         splitter.addWidget(upper)
         splitter.addWidget(lower)
@@ -222,8 +227,8 @@ class MainWindow(QWidget):
 
     def _render_site_fields(self) -> None:
         self._capture_site_fields()
-        while self.site_form.rowCount():
-            self.site_form.removeRow(0)
+        while self.site_form.rowCount() > 4:
+            self.site_form.removeRow(4)
         self._site_widgets = {}
         key = self.site_combo.currentData()
         if key not in self._adapters:
@@ -310,6 +315,7 @@ class MainWindow(QWidget):
         self._total = len(request.subjects)
         self.progress_bar.setRange(0, self._total)
         self.progress_bar.setValue(0)
+        self.progress_bar.show()
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self._log(f"开始批次：{len(request.subjects)} 个主体")
@@ -348,6 +354,7 @@ class MainWindow(QWidget):
 
     def _on_batch_result(self, successes: int, failures: int, stopped: bool) -> None:
         self._running = False
+        self.progress_bar.hide()
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         summary = f"批次{'已停止' if stopped else '完成'}：成功 {successes}，失败 {failures}"
