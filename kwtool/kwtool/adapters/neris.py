@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import Error as PlaywrightError, Page
 
 from kwtool.adapters.base import RunContext, SiteAdapter, SiteUnavailable
 from kwtool.models import PdfSettings
@@ -18,6 +18,18 @@ SEARCH_BUTTON = "button:has-text('搜索'), input[type='submit'], img[alt='搜�
 def _result_page(url: str) -> bool:
     parsed = urlparse(url)
     return parsed.hostname == "neris.csrc.gov.cn" and parsed.path.rstrip("/") == "/shixinchaxun/searchResult"
+
+
+def _find_result(context: RunContext, search_page: Page, prior_pages: set[Page]) -> Page | None:
+    for page in reversed(context.browser.pages):
+        if page.is_closed() or (page is not search_page and page in prior_pages) or not _result_page(page.url):
+            continue
+        try:
+            if "查询结果" in page.locator("body").inner_text(timeout=5000):
+                return page
+        except PlaywrightError:
+            pass  # The newly opened tab may still be loading.
+    return None
 
 
 class NerisAdapter(SiteAdapter):
@@ -46,16 +58,27 @@ class NerisAdapter(SiteAdapter):
         if not search.is_visible():
             raise ValueError("未找到失信查询的搜索按钮")
         context.report_status(f"正在查询证监会失信记录：{subject}")
+        prior_pages = set(context.browser.pages)
         search.click()
 
         context.wait_until(
-            lambda: _result_page(page.url) and page.get_by_text("查询结果", exact=True).first.is_visible(),
+            lambda: _find_result(context, page, prior_pages) is not None,
             "请在 Chrome 中完成本次滑块验证；如页面仍未提交，请点击搜索。完成后将自动保存结果。",
             timeout_seconds=600,
             user_action=True,
         )
-        page.evaluate("document.fonts.ready")
-        page.emulate_media(media="screen")
-        page.evaluate("window.scrollTo(0, 0)")
-        saved = context.save_pdf(page)
-        context.report_status(f"已保存证监会失信查询结果：{saved}")
+        result = _find_result(context, page, prior_pages)
+        assert result is not None
+        try:
+            result.evaluate("document.fonts.ready")
+            result.emulate_media(media="screen")
+            result.evaluate("window.scrollTo(0, 0)")
+            saved = context.save_pdf(result)
+            context.report_status(f"已保存证监会失信查询结果：{saved}")
+        finally:
+            if result is not page:
+                try:
+                    result.close()
+                    page.bring_to_front()
+                except PlaywrightError:
+                    pass  # Chrome may have been closed by the user.

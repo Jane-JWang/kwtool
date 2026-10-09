@@ -28,6 +28,9 @@ def test_each_query_waits_for_manual_verification_before_printing(tmp_path: Path
         def click(self):
             self.page.clicked += 1
 
+        def inner_text(self, **kwargs):
+            return "查询结果\n无符合条件记录"
+
     class Page:
         url = "about:blank"
 
@@ -35,6 +38,7 @@ def test_each_query_waits_for_manual_verification_before_printing(tmp_path: Path
             self.filled = []
             self.clicked = 0
             self.pdf_options = []
+            self.closed = False
 
         def goto(self, url, **kwargs):
             assert url == HOME
@@ -58,11 +62,26 @@ def test_each_query_waits_for_manual_verification_before_printing(tmp_path: Path
             self.pdf_options.append(kwargs)
             return b"%PDF-1.4\n"
 
+        def is_closed(self):
+            return self.closed
+
+        def close(self):
+            self.closed = True
+
+        def bring_to_front(self):
+            pass
+
+    class Browser:
+        def __init__(self, page):
+            self.pages = [page]
+
     adapter = registered_adapters()["neris"]
     assert isinstance(adapter, NerisAdapter)
     page = Page()
+    browser = Browser(page)
+    results = []
     context = RunContext(
-        browser=None,  # type: ignore[arg-type]
+        browser=browser,  # type: ignore[arg-type]
         page=page,  # type: ignore[arg-type]
         pdf_path=tmp_path / "first.pdf",
         pdf_settings=adapter.default_pdf_settings,
@@ -78,7 +97,10 @@ def test_each_query_waits_for_manual_verification_before_printing(tmp_path: Path
         if kwargs.get("user_action"):
             assert page.clicked == len(page.filled)
             assert not ready()
-            page.url = "https://neris.csrc.gov.cn/shixinchaxun/searchResult?obj_name=测试"
+            result = Page()
+            result.url = "https://neris.csrc.gov.cn/shixinchaxun/searchResult?obj_name=测试"
+            browser.pages.append(result)
+            results.append(result)
         assert ready()
 
     context.wait_until = wait_until  # type: ignore[method-assign]
@@ -88,4 +110,6 @@ def test_each_query_waits_for_manual_verification_before_printing(tmp_path: Path
     assert page.filled == ["主体甲", "主体乙"]
     assert waits == [False, True, False, True]
     assert len(context.artifacts) == 2
-    assert all(options["landscape"] is False and options["scale"] == 0.35 for options in page.pdf_options)
+    assert all(result.closed for result in results)
+    assert all(len(result.pdf_options) == 1 for result in results)
+    assert all(result.pdf_options[0]["landscape"] is False and result.pdf_options[0]["scale"] == 0.35 for result in results)
