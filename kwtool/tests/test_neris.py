@@ -3,13 +3,36 @@ from threading import Event
 
 from kwtool.adapters import registered_adapters
 from kwtool.adapters.base import RunContext
-from kwtool.adapters.neris import HOME, NerisAdapter, _result_page
+from kwtool.adapters.neris import HOME, NerisAdapter, _find_result, _result_page
 
 
 def test_result_page_requires_neris_host_and_search_result_path() -> None:
     assert _result_page("https://neris.csrc.gov.cn/shixinchaxun/searchResult?obj_name=测试")
     assert not _result_page("https://neris.csrc.gov.cn/shixinchaxun/")
     assert not _result_page("https://other.example/shixinchaxun/searchResult")
+
+
+def test_result_lookup_includes_other_chrome_contexts() -> None:
+    class Page:
+        def __init__(self, url):
+            self.url = url
+
+        def is_closed(self):
+            return False
+
+    class BrowserContext:
+        def __init__(self, pages):
+            self.pages = pages
+            self.browser = None
+
+    search = Page(HOME)
+    result = Page("https://neris.csrc.gov.cn/shixinchaxun/searchResult?obj_name=主体甲")
+    primary = BrowserContext([search])
+    secondary = BrowserContext([result])
+    chrome = type("Chrome", (), {"contexts": [primary, secondary]})()
+    primary.browser = chrome
+    assert _find_result(type("Context", (), {"browser": primary})(), "主体甲") is result
+    assert _find_result(type("Context", (), {"browser": primary})(), "主体乙") is None
 
 
 def test_each_query_waits_for_manual_verification_before_printing(tmp_path: Path) -> None:
@@ -62,6 +85,9 @@ def test_each_query_waits_for_manual_verification_before_printing(tmp_path: Path
             self.pdf_options.append(kwargs)
             return b"%PDF-1.4\n"
 
+        def wait_for_load_state(self, *args, **kwargs):
+            pass
+
         def is_closed(self):
             return self.closed
 
@@ -72,6 +98,8 @@ def test_each_query_waits_for_manual_verification_before_printing(tmp_path: Path
             pass
 
     class Browser:
+        browser = None
+
         def __init__(self, page):
             self.pages = [page]
 
@@ -98,7 +126,7 @@ def test_each_query_waits_for_manual_verification_before_printing(tmp_path: Path
             assert page.clicked == len(page.filled)
             assert not ready()
             result = Page()
-            result.url = "https://neris.csrc.gov.cn/shixinchaxun/searchResult?obj_name=测试"
+            result.url = f"https://neris.csrc.gov.cn/shixinchaxun/searchResult?obj_name={page.filled[-1]}"
             browser.pages.append(result)
             results.append(result)
         assert ready()
@@ -108,7 +136,7 @@ def test_each_query_waits_for_manual_verification_before_printing(tmp_path: Path
     context.pdf_path = tmp_path / "second.pdf"
     adapter.run_one(context, "主体乙")
     assert page.filled == ["主体甲", "主体乙"]
-    assert waits == [False, True, False, True]
+    assert waits == [False, True, False, False, True, False]
     assert len(context.artifacts) == 2
     assert all(result.closed for result in results)
     assert all(len(result.pdf_options) == 1 for result in results)

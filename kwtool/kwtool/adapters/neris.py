@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import Error as PlaywrightError, Page
 
@@ -20,15 +20,18 @@ def _result_page(url: str) -> bool:
     return parsed.hostname == "neris.csrc.gov.cn" and parsed.path.rstrip("/") == "/shixinchaxun/searchResult"
 
 
-def _find_result(context: RunContext, search_page: Page, prior_pages: set[Page]) -> Page | None:
-    for page in reversed(context.browser.pages):
-        if page.is_closed() or (page is not search_page and page in prior_pages) or not _result_page(page.url):
+def _pages(context: RunContext) -> list[Page]:
+    browser = context.browser.browser
+    contexts = browser.contexts if browser is not None else [context.browser]
+    return [page for browser_context in contexts for page in browser_context.pages]
+
+
+def _find_result(context: RunContext, subject: str) -> Page | None:
+    for page in reversed(_pages(context)):
+        if page.is_closed() or not _result_page(page.url):
             continue
-        try:
-            if "查询结果" in page.locator("body").inner_text(timeout=5000):
-                return page
-        except PlaywrightError:
-            pass  # The newly opened tab may still be loading.
+        if subject in parse_qs(urlparse(page.url).query).get("obj_name", []):
+            return page
     return None
 
 
@@ -40,6 +43,11 @@ class NerisAdapter(SiteAdapter):
     def run_one(self, context: RunContext, subject: str) -> None:
         context.check_stop()
         page = context.page
+        # A previous attempt can leave a result tab open. Remove it before
+        # submitting this subject so it cannot be mistaken for the new result.
+        for other in _pages(context):
+            if other is not page and not other.is_closed() and _result_page(other.url):
+                other.close()
         try:
             response = page.goto(HOME, wait_until="domcontentloaded", timeout=60000)
         except PlaywrightError as exc:
@@ -58,18 +66,23 @@ class NerisAdapter(SiteAdapter):
         if not search.is_visible():
             raise ValueError("未找到失信查询的搜索按钮")
         context.report_status(f"正在查询证监会失信记录：{subject}")
-        prior_pages = set(context.browser.pages)
         search.click()
 
         context.wait_until(
-            lambda: _find_result(context, page, prior_pages) is not None,
+            lambda: _find_result(context, subject) is not None,
             "请在 Chrome 中完成本次滑块验证；如页面仍未提交，请点击搜索。完成后将自动保存结果。",
             timeout_seconds=600,
             user_action=True,
         )
-        result = _find_result(context, page, prior_pages)
+        result = _find_result(context, subject)
         assert result is not None
         try:
+            result.wait_for_load_state("domcontentloaded", timeout=30000)
+            context.wait_until(
+                lambda: "查询结果" in result.locator("body").inner_text(timeout=5000),
+                "等待失信查询结果内容加载…",
+                timeout_seconds=60,
+            )
             result.evaluate("document.fonts.ready")
             result.emulate_media(media="screen")
             result.evaluate("window.scrollTo(0, 0)")
