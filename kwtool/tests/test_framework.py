@@ -95,6 +95,7 @@ def test_demo_adapter_prints_with_browser_headers(tmp_path: Path) -> None:
     assert 'class="title"' in page.pdf_options["header_template"]
     assert 'class="url"' in page.pdf_options["footer_template"]
     assert 'class="pageNumber"' in page.pdf_options["footer_template"]
+    assert 'position:absolute' in page.pdf_options["footer_template"]
     assert artifacts == [tmp_path / "demo.pdf"]
     assert artifacts[0].read_bytes().startswith(b"%PDF")
 
