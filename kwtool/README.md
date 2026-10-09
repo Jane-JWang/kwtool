@@ -23,6 +23,8 @@ python launcher.py
 
 选择“上海证券交易所”后，可在“网页专属配置”中选择精确搜索或模糊搜索，并勾选全部、公告、规则、监管、新闻中的一个或多个栏目。程序按勾选栏目顺序分别打印当前搜索结果；多个栏目的页面合并为每个主体的一份 PDF。默认选择模糊搜索和“全部”栏目，打印缩放为 35%，包含浏览器样式的页眉与页脚。
 
+选择“市场监管行政处罚文书网”后，程序会在每次查询前点击网站的“清空检索条件”，再按“当事人名称”检索并保存第 1 页结果。连续查询时不会叠加上一主体的筛选条件。默认打印缩放为 35%，包含浏览器样式的页眉与页脚。
+
 默认输出模板为 `Output/[date]/[id]-[object]-[website].pdf`。相对路径基于用户“文档/kwtool”；支持 `[date]`（YYMMDD）、`[time]`（HHMMSS）、`[year]`、`[month]`、`[day]`、`[hour]`、`[minute]`、`[second]`、`[id]`（批次序号）、`[object]`（查询主体）、`[website]`（网站名称）。绝对路径也可使用。已有文件会自动增加 `_2`、`_3` 等后缀。Chrome 专用资料保存在 `%LOCALAPPDATA%\kwtool\chrome-profile\cdp`，界面设置保存在 `%APPDATA%\kwtool\settings.json`。程序默认自行启动独立 Chrome，再通过本机调试端口连接。
 
 如需单独验证 Chrome 的启动和连接，可以手动启动独立 Chrome，再让 kwtool 连接。先关闭 kwtool，在 PowerShell 中执行以下命令，并保持 Chrome 窗口打开：
