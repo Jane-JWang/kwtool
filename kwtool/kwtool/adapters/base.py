@@ -23,9 +23,11 @@ def print_header(now: datetime) -> str:
 
 
 PRINT_FOOTER = ('<div style="width:100%;font-size:8px;color:#111;padding:0 0.35in;'
-                'display:flex;justify-content:space-between">'
-                '<span class="url" style="max-width:85%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>'
-                '<span><span class="pageNumber"></span>/<span class="totalPages"></span></span></div>')
+                'box-sizing:border-box;position:relative">'
+                '<span class="url" style="display:block;width:80%;overflow:hidden;'
+                'text-overflow:ellipsis;white-space:nowrap"></span>'
+                '<span style="position:absolute;right:0.35in;top:0;white-space:nowrap">'
+                '<span class="pageNumber"></span>/<span class="totalPages"></span></span></div>')
 
 
 class RunCancelled(Exception):
