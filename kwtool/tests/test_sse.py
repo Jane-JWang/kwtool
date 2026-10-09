@@ -12,7 +12,7 @@ from pypdf import PdfReader
 
 from kwtool.adapters import registered_adapters
 from kwtool.adapters.base import RunContext
-from kwtool.adapters.sse import SECTIONS, SseAdapter, search_url
+from kwtool.adapters.sse import DEFAULT_KEYWORDS, SECTIONS, SseAdapter, parse_keywords, search_url
 
 
 def test_sse_configuration_and_url() -> None:
@@ -21,12 +21,16 @@ def test_sse_configuration_and_url() -> None:
     assert adapter.default_pdf_settings.scale == 0.35
     assert adapter.default_pdf_settings.print_background is True
     assert adapter.settings_schema[0].choices == ("精确搜索", "模糊搜索")
-    assert [spec.label for spec in adapter.settings_schema[1:]] == [name for name, _ in SECTIONS]
-    assert [spec.default for spec in adapter.settings_schema[1:]] == [True, False, False, False, False]
+    assert adapter.settings_schema[1].default == DEFAULT_KEYWORDS
+    assert adapter.settings_schema[2].default == 1
+    assert [spec.label for spec in adapter.settings_schema[3:]] == [name for name, _ in SECTIONS]
+    assert [spec.default for spec in adapter.settings_schema[3:]] == [True, False, False, False, False]
+    assert parse_keywords("  行政处罚   警示函\t责令改正  行政处罚  ") == ("行政处罚", "警示函", "责令改正")
     parsed = urlparse(search_url("中信建投证券股份有限公司 & 甲"))
     assert parsed.hostname == "www.sse.com.cn"
     assert parsed.path == "/home/search/index.shtml"
     assert parse_qs(parsed.query) == {"webswd": ["中信建投证券股份有限公司 & 甲"]}
+    assert "%20" in parsed.query and "+" not in parsed.query
 
 
 def test_sse_requires_a_section(tmp_path: Path) -> None:
@@ -47,16 +51,26 @@ def test_sse_prints_selected_sections_and_merges_in_order(tmp_path: Path) -> Non
     panels = "".join(f'''<section id="panel-{i}" style="display:{"block" if i == 0 else "none"}">
         <div class="tool_title" onclick="setMode({i}, 0)">精确搜索<span>按时间排序</span></div>
         <div class="tool_title titleSelected" onclick="setMode({i}, 1)">模糊搜索<span>按相关度排序</span></div>
-        <div class="list-group-item"><a class="bot_title_a">SECTION{i}</a></div>
+        <div class="list-group-item"><a class="bot_title_a">SECTION{i}-PAGE1</a></div>
+        <div class="pagination-box"><ul><li class="active"><a>1</a></li>
+          <li class="next"><a href="javascript:sseSearch.getAllWordsResultNew(1,20);"
+            onclick="nextPage({i}); return false;">下一页</a></li></ul></div>
         </section>''' for i in range(len(SECTIONS)))
     html = f'''<!doctype html><html><head><title>上证搜索 | 上海证券交易所</title>
       <style>body {{font-size:14px}} .tool_title {{display:inline-block;padding:8px}}</style></head><body>
       <input id="searchword"><div id="tab-switch0">{tabs}</div>{panels}
       <script>
       document.querySelector('#searchword').value = new URLSearchParams(location.search).get('webswd');
+      const keyword = document.querySelector('#searchword').value.split(' ').at(-1);
+      document.querySelectorAll('.bot_title_a').forEach(x=>x.textContent += '-' + keyword);
       function choose(i) {{
         document.querySelectorAll('#tab-switch0 span').forEach((x,j)=>x.classList.toggle('active',j===i));
         document.querySelectorAll('section').forEach((x,j)=>x.style.display=j===i?'block':'none');
+      }}
+      function nextPage(i) {{
+        document.querySelector('#panel-'+i+' .bot_title_a').textContent='SECTION'+i+'-PAGE2-'+keyword;
+        document.querySelector('#panel-'+i+' .pagination-box li.active a').textContent='2';
+        document.querySelector('#panel-'+i+' .pagination-box li.next a').href='javascript:void(0);';
       }}
       function setMode(i, n) {{
         document.querySelectorAll('#panel-'+i+' .tool_title').forEach((x,j)=>x.classList.toggle('titleSelected',j===n));
@@ -75,15 +89,22 @@ def test_sse_prints_selected_sections_and_merges_in_order(tmp_path: Path) -> Non
             adapter = SseAdapter()
             context = RunContext(browser_context, browser_context.new_page(), tmp_path / "result.pdf",
                                  adapter.default_pdf_settings,
-                                 {"search_mode": "精确搜索", "section_0": True, "section_1": False,
+                                 {"search_mode": "精确搜索", "keywords": "alpha   beta alpha", "max_pages": 2,
+                                  "section_0": True, "section_1": False,
                                   "section_2": False, "section_3": True, "section_4": False},
                                  Event(), lambda _: None, [])
             adapter.run_one(context, "测试公司")
             assert context.artifacts == [tmp_path / "result.pdf"]
             pages = PdfReader(context.artifacts[0]).pages
-            assert len(pages) == 2
-            assert "SECTION0" in pages[0].extract_text()
-            assert "SECTION3" in pages[1].extract_text()
+            assert len(pages) == 8
+            assert "SECTION0-PAGE1-alpha" in pages[0].extract_text()
+            assert "SECTION0-PAGE2-alpha" in pages[1].extract_text()
+            assert "SECTION3-PAGE1-alpha" in pages[2].extract_text()
+            assert "SECTION3-PAGE2-alpha" in pages[3].extract_text()
+            assert "SECTION0-PAGE1-beta" in pages[4].extract_text()
+            assert "SECTION0-PAGE2-beta" in pages[5].extract_text()
+            assert "SECTION3-PAGE1-beta" in pages[6].extract_text()
+            assert "SECTION3-PAGE2-beta" in pages[7].extract_text()
             assert "SECTION3" not in pages[0].extract_text()
         finally:
             browser.close()
