@@ -3,13 +3,24 @@ from threading import Event
 
 from kwtool.adapters import registered_adapters
 from kwtool.adapters.base import RunContext
-from kwtool.adapters.neris import HOME, NerisAdapter, _find_result, _page_snapshot, _result_page
+from kwtool.adapters.neris import HOME, RESULT_STATE, NerisAdapter, _data_ready, _find_result, _page_snapshot, _result_page
 
 
 def test_result_page_requires_neris_host_and_search_result_path() -> None:
     assert _result_page("https://neris.csrc.gov.cn/shixinchaxun/searchResult?obj_name=测试")
     assert not _result_page("https://neris.csrc.gov.cn/shixinchaxun/")
     assert not _result_page("https://other.example/shixinchaxun/searchResult")
+
+
+def test_result_data_must_finish_loading_before_print() -> None:
+    initial = {"vueFound": True, "loading": True, "rows": 0, "noData": False, "renderedRows": 0}
+    blank_table = {**initial, "loading": False}
+    records = {**initial, "loading": False, "rows": 2, "renderedRows": 2}
+    empty_result = {**initial, "loading": False, "noData": True}
+    assert not _data_ready(initial)
+    assert not _data_ready(blank_table)
+    assert _data_ready(records)
+    assert _data_ready(empty_result)
 
 
 def test_result_lookup_includes_other_chrome_contexts() -> None:
@@ -64,6 +75,7 @@ def test_each_query_waits_for_manual_verification_before_printing(tmp_path: Path
             self.clicked = 0
             self.pdf_options = []
             self.closed = False
+            self.loaded = False
 
         def goto(self, url, **kwargs):
             assert url == HOME
@@ -78,14 +90,22 @@ def test_each_query_waits_for_manual_verification_before_printing(tmp_path: Path
             return Element(self, text)
 
         def evaluate(self, expression):
+            if expression == RESULT_STATE:
+                return {"vueFound": True, "loading": not self.loaded, "rows": 1 if self.loaded else 0,
+                        "total": 1 if self.loaded else 0, "noData": False,
+                        "renderedRows": 1 if self.loaded else 0}
             assert expression in {"document.fonts.ready", "window.scrollTo(0, 0)"}
 
         def emulate_media(self, **kwargs):
             assert kwargs == {"media": "screen"}
 
         def pdf(self, **kwargs):
+            assert self.loaded
             self.pdf_options.append(kwargs)
             return b"%PDF-1.4\n"
+
+        def wait_for_timeout(self, milliseconds):
+            assert milliseconds == 100
 
         def wait_for_load_state(self, *args, **kwargs):
             pass
@@ -131,6 +151,9 @@ def test_each_query_waits_for_manual_verification_before_printing(tmp_path: Path
             result.url = f"https://neris.csrc.gov.cn/shixinchaxun/searchResult?obj_name={page.filled[-1]}"
             browser.pages.append(result)
             results.append(result)
+        elif message == "等待失信查询数据加载完成…":
+            assert not ready()
+            results[-1].loaded = True
         assert ready()
 
     context.wait_until = wait_until  # type: ignore[method-assign]

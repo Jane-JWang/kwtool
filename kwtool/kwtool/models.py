@@ -38,6 +38,7 @@ class BatchRequest:
     output_template: str
     pdf: PdfSettings
     site_settings: dict[str, bool | str | int] = field(default_factory=dict)
+    diagnostics: bool = False
 
 
 @dataclass(frozen=True)

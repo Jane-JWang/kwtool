@@ -10,6 +10,7 @@ from typing import Callable
 from playwright.sync_api import BrowserContext, Download, Page
 
 from kwtool.models import FieldSpec, PdfSettings
+from kwtool.diagnostics import capture_page
 from kwtool.output import save_download, save_pdf_bytes
 
 
@@ -49,6 +50,7 @@ class RunContext:
     report_status: Callable[[str], None]
     artifacts: list[Path]
     report_user_action: Callable[[bool], None] = lambda _needed: None
+    diagnostics_dir: Path | None = None
 
     def check_stop(self) -> None:
         if self.stop_event.is_set():
@@ -101,6 +103,16 @@ class RunContext:
         saved = save_download(download, self.pdf_path)
         self.artifacts.append(saved)
         return saved
+
+    def capture_diagnostic(self, label: str, page: Page | None = None) -> None:
+        if self.diagnostics_dir is None:
+            return
+        import logging
+
+        try:
+            capture_page(page or self.page, self.diagnostics_dir, label)
+        except Exception:
+            logging.getLogger("kwtool").exception("无法保存诊断快照：%s", label)
 
 
 class SiteAdapter(ABC):

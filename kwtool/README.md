@@ -13,7 +13,7 @@ python -m pip install -e '.[dev]'
 python launcher.py
 ```
 
-演示时，在左侧每行输入一个主体，选择“本地演示”，点击“查询”。程序自动打印 PDF 并处理下一行。“停止”会在当前浏览器操作结束后终止批次。界面显示进度和状态，详细日志写入 `%APPDATA%\kwtool\kwtool.log`。
+演示时，在左侧每行输入一个主体，选择“本地演示”，点击“查询”。程序自动打印 PDF 并处理下一行。“停止”会在当前浏览器操作结束后终止批次。界面显示进度和状态，详细日志写入 `%APPDATA%\kwtool\kwtool.log`。需要排查网站变化时，可勾选“诊断模式”；适配器调用 `context.capture_diagnostic(label, page)` 后，截图和页面文字、元素结构会保存到 `%APPDATA%\kwtool\diagnostics\`。诊断文件不保存网址查询参数的值，可能包含网页上显示的主体和查询结果，请按需分享。
 
 选择“企信网”后，程序会在右侧 Chrome 搜索每家企业、依次加载详情栏目、保存网页 PDF，并通过网站发送邮件报告。首次访问会等待网站的环境检查；页面出现登录入口时，会提示用户在 Chrome 中登录。搜索和发送报告时出现的验证码由用户手动完成。搜索没有唯一完全匹配项时，在右侧网页点击正确的企业。PDF 已保存但邮件未获网站成功提示时，该行记为失败并继续下一家，已保存的 PDF 不会删除或自动重发邮件。企信网初始打印设置为 A4 纵向、55% 缩放、打印背景，可在“网页专属配置”中调整。
 
@@ -39,7 +39,7 @@ $env:KWTOOL_CDP_URL = 'http://127.0.0.1:9229'
 
 ## 新增网站
 
-在 `kwtool/adapters/` 新建 `SiteAdapter` 子类，实现 `run_one(context, subject)`，并在 `kwtool/adapters/__init__.py` 的 `registered_adapters()` 中注册。适配器通过 `settings_schema` 声明网站专属设置；打印设置可能因网站而异，应由对应适配器处理。`context.page` 用于浏览器操作，`context.wait_until(ready, message)` 可根据网站状态检测验证码完成后自动继续，`context.save_pdf()` 和 `context.save_download(download)` 用于保存结果。长流程应定期调用 `context.check_stop()`。
+在 `kwtool/adapters/` 新建 `SiteAdapter` 子类，实现 `run_one(context, subject)`，并在 `kwtool/adapters/__init__.py` 的 `registered_adapters()` 中注册。适配器通过 `settings_schema` 声明网站专属设置；打印设置可能因网站而异，应由对应适配器处理。`context.page` 用于浏览器操作，`context.wait_until(ready, message)` 可根据网站状态检测验证码完成后自动继续，`context.save_pdf()` 和 `context.save_download(download)` 用于保存结果。`kwtool.diagnostics.browser_snapshot()` 可记录脱敏后的标签页状态，`context.capture_diagnostic(label, page)` 可在诊断模式保存页面证据。长流程应定期调用 `context.check_stop()`。
 
 ## 测试和打包
 

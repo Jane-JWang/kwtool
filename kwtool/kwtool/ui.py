@@ -167,6 +167,10 @@ class MainWindow(QWidget):
         buttons.addWidget(self.stop_button)
         upper_layout.addLayout(buttons)
 
+        self.diagnostics_check = QCheckBox("诊断模式（保存页面截图和结构）")
+        self.diagnostics_check.setToolTip("每个查询阶段在应用日志目录下保存截图和页面结构，便于排查网站变化")
+        upper_layout.addWidget(self.diagnostics_check)
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setFormat("%v of %m")
         upper_layout.addWidget(self.progress_bar)
@@ -221,6 +225,7 @@ class MainWindow(QWidget):
     def _restore_settings(self) -> None:
         self.subjects_edit.setPlainText(str(self._saved.get("subjects", "")))
         self.template_edit.setText(default_template(self._saved))
+        self.diagnostics_check.setChecked(bool(self._saved.get("diagnostics", False)))
         saved_key = self._saved.get("site_key")
         index = self.site_combo.findData(saved_key)
         if index >= 0:
@@ -312,6 +317,7 @@ class MainWindow(QWidget):
             "output_template": self.template_edit.text(),
             "site_settings": self._site_values,
             "site_pdf_settings": self._site_pdf_values,
+            "diagnostics": self.diagnostics_check.isChecked(),
         })
 
     def _open_output_directory(self) -> None:
@@ -345,6 +351,7 @@ class MainWindow(QWidget):
                 output_template=template,
                 pdf=self._pdf_settings(),
                 site_settings=dict(self._site_values.get(key, {})),
+                diagnostics=self.diagnostics_check.isChecked(),
             )
             self._save_preferences()
         except (ValueError, OSError) as exc:

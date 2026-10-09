@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 from playwright.sync_api import Error as PlaywrightError, Page
 
 from kwtool.adapters.base import RunContext, SiteAdapter, SiteUnavailable
+from kwtool.diagnostics import browser_pages, browser_snapshot
 from kwtool.models import PdfSettings
 
 
@@ -15,6 +16,26 @@ HOME = "https://neris.csrc.gov.cn/shixinchaxun/"
 NAME_INPUT = "input[placeholder*='必须填写姓名'], input[placeholder*='姓名或名称']"
 SEARCH_BUTTON = "button:has-text('搜索'), input[type='submit'], img[alt='搜索'], [role='button']:has-text('搜索')"
 LOGGER = logging.getLogger("kwtool")
+RESULT_STATE = """() => {
+  const queue = [document.querySelector('#app')?.__vue__];
+  let view = null;
+  for (let i = 0; i < queue.length && i < 100; i++) {
+    const item = queue[i];
+    if (!item) continue;
+    if (item.data1 && Array.isArray(item.data1.rows) && typeof item.loading === 'boolean') {
+      view = item;
+      break;
+    }
+    queue.push(...(item.$children || []));
+  }
+  const noData = Array.from(document.querySelectorAll('.noData')).some(el =>
+    el.getClientRects().length && el.textContent.includes('无符合条件记录'));
+  const renderedRows = document.querySelectorAll('.resultBox .ivu-table-row').length;
+  const rows = view ? view.data1.rows.length : renderedRows;
+  const loading = view ? view.loading : null;
+  return {vueFound: !!view, loading, rows, total: view ? view.data1.total : null,
+    noData, renderedRows};
+}"""
 
 
 def _result_page(url: str) -> bool:
@@ -22,14 +43,8 @@ def _result_page(url: str) -> bool:
     return parsed.hostname == "neris.csrc.gov.cn" and parsed.path.rstrip("/") == "/shixinchaxun/searchResult"
 
 
-def _pages(context: RunContext) -> list[Page]:
-    browser = context.browser.browser
-    contexts = browser.contexts if browser is not None else [context.browser]
-    return [page for browser_context in contexts for page in browser_context.pages]
-
-
 def _find_result(context: RunContext, subject: str) -> Page | None:
-    for page in reversed(_pages(context)):
+    for page in reversed(browser_pages(context.browser)):
         if page.is_closed() or not _result_page(page.url):
             continue
         if subject in parse_qs(urlparse(page.url).query).get("obj_name", []):
@@ -38,15 +53,17 @@ def _find_result(context: RunContext, subject: str) -> Page | None:
 
 
 def _page_snapshot(context: RunContext, subject: str) -> str:
-    """Describe observed tabs without logging the CAPTCHA verification token."""
-    tabs = []
-    for page in _pages(context):
-        if page.is_closed():
-            continue
-        parsed = urlparse(page.url)
-        match = subject in parse_qs(parsed.query).get("obj_name", [])
-        tabs.append(f"{parsed.hostname or '-'}{parsed.path} (subject_match={match})")
-    return "; ".join(tabs) or "no open tabs"
+    return browser_snapshot(context.browser, query_match=("obj_name", subject))
+
+
+def _result_state(page: Page) -> dict:
+    return page.evaluate(RESULT_STATE)
+
+
+def _data_ready(state: dict) -> bool:
+    if state["vueFound"]:
+        return state["loading"] is False and (state["rows"] > 0 or state["noData"])
+    return state["renderedRows"] > 0 or state["noData"]
 
 
 class NerisAdapter(SiteAdapter):
@@ -60,7 +77,7 @@ class NerisAdapter(SiteAdapter):
         LOGGER.info("NERIS 查询开始：%s；标签页：%s", subject, _page_snapshot(context, subject))
         # A previous attempt can leave a result tab open. Remove it before
         # submitting this subject so it cannot be mistaken for the new result.
-        for other in _pages(context):
+        for other in browser_pages(context.browser):
             if other is not page and not other.is_closed() and _result_page(other.url):
                 other.close()
         try:
@@ -102,16 +119,29 @@ class NerisAdapter(SiteAdapter):
         result = _find_result(context, subject)
         assert result is not None
         LOGGER.info("NERIS 已识别结果页：%s；标签页：%s", subject, _page_snapshot(context, subject))
+        context.capture_diagnostic("result-detected", result)
         try:
             result.wait_for_load_state("domcontentloaded", timeout=30000)
-            context.wait_until(
-                lambda: "查询结果" in result.locator("body").inner_text(timeout=5000),
-                "等待失信查询结果内容加载…",
-                timeout_seconds=60,
-            )
+            last_state = None
+
+            def data_ready() -> bool:
+                nonlocal last_state
+                state = _result_state(result)
+                if state != last_state:
+                    LOGGER.info("NERIS 结果数据状态：%s；%s", subject, state)
+                    last_state = state
+                return _data_ready(state)
+
+            try:
+                context.wait_until(data_ready, "等待失信查询数据加载完成…", timeout_seconds=60)
+            except TimeoutError:
+                context.capture_diagnostic("result-timeout", result)
+                raise
+            result.wait_for_timeout(100)
             result.evaluate("document.fonts.ready")
             result.emulate_media(media="screen")
             result.evaluate("window.scrollTo(0, 0)")
+            context.capture_diagnostic("ready-to-print", result)
             saved = context.save_pdf(result)
             context.report_status(f"已保存证监会失信查询结果：{saved}")
         finally:
