@@ -3,7 +3,7 @@ from threading import Event
 
 from kwtool.adapters import registered_adapters
 from kwtool.adapters.base import RunContext
-from kwtool.adapters.neris import HOME, NerisAdapter, _find_result, _result_page
+from kwtool.adapters.neris import HOME, NerisAdapter, _find_result, _page_snapshot, _result_page
 
 
 def test_result_page_requires_neris_host_and_search_result_path() -> None:
@@ -33,6 +33,8 @@ def test_result_lookup_includes_other_chrome_contexts() -> None:
     primary.browser = chrome
     assert _find_result(type("Context", (), {"browser": primary})(), "主体甲") is result
     assert _find_result(type("Context", (), {"browser": primary})(), "主体乙") is None
+    result.url += "&verification=secret-token"
+    assert "secret-token" not in _page_snapshot(type("Context", (), {"browser": primary})(), "主体甲")
 
 
 def test_each_query_waits_for_manual_verification_before_printing(tmp_path: Path) -> None:

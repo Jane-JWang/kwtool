@@ -142,6 +142,29 @@ def test_user_action_indicator_resets_after_wait(tmp_path: Path) -> None:
     assert states == [True, False, True, False]
 
 
+def test_wait_until_pumps_browser_events(tmp_path: Path) -> None:
+    class EventPage:
+        dispatched = False
+
+        def wait_for_timeout(self, milliseconds: int) -> None:
+            assert milliseconds == 250
+            self.dispatched = True
+
+    page = EventPage()
+    context = RunContext(
+        browser=None,  # type: ignore[arg-type]
+        page=page,  # type: ignore[arg-type]
+        pdf_path=tmp_path / "unused.pdf",
+        pdf_settings=PdfSettings(),
+        site_settings={},
+        stop_event=Event(),
+        report_status=lambda _: None,
+        artifacts=[],
+    )
+    context.wait_until(lambda: page.dispatched, "等待新标签页", timeout_seconds=1)
+    assert page.dispatched
+
+
 def test_closed_chrome_is_relaunched_before_next_batch(tmp_path: Path, monkeypatch) -> None:
     worker = BrowserWorker(tmp_path / "profile", tmp_path, BrowserLayout(0, 0, 800, 600))
     class BrowserConnection:

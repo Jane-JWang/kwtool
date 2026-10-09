@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import Error as PlaywrightError, Page
@@ -13,6 +14,7 @@ from kwtool.models import PdfSettings
 HOME = "https://neris.csrc.gov.cn/shixinchaxun/"
 NAME_INPUT = "input[placeholder*='必须填写姓名'], input[placeholder*='姓名或名称']"
 SEARCH_BUTTON = "button:has-text('搜索'), input[type='submit'], img[alt='搜索'], [role='button']:has-text('搜索')"
+LOGGER = logging.getLogger("kwtool")
 
 
 def _result_page(url: str) -> bool:
@@ -35,6 +37,18 @@ def _find_result(context: RunContext, subject: str) -> Page | None:
     return None
 
 
+def _page_snapshot(context: RunContext, subject: str) -> str:
+    """Describe observed tabs without logging the CAPTCHA verification token."""
+    tabs = []
+    for page in _pages(context):
+        if page.is_closed():
+            continue
+        parsed = urlparse(page.url)
+        match = subject in parse_qs(parsed.query).get("obj_name", [])
+        tabs.append(f"{parsed.hostname or '-'}{parsed.path} (subject_match={match})")
+    return "; ".join(tabs) or "no open tabs"
+
+
 class NerisAdapter(SiteAdapter):
     key = "neris"
     display_name = "证监会失信查询"
@@ -43,6 +57,7 @@ class NerisAdapter(SiteAdapter):
     def run_one(self, context: RunContext, subject: str) -> None:
         context.check_stop()
         page = context.page
+        LOGGER.info("NERIS 查询开始：%s；标签页：%s", subject, _page_snapshot(context, subject))
         # A previous attempt can leave a result tab open. Remove it before
         # submitting this subject so it cannot be mistaken for the new result.
         for other in _pages(context):
@@ -68,14 +83,25 @@ class NerisAdapter(SiteAdapter):
         context.report_status(f"正在查询证监会失信记录：{subject}")
         search.click()
 
+        last_snapshot = None
+
+        def result_ready() -> bool:
+            nonlocal last_snapshot
+            snapshot = _page_snapshot(context, subject)
+            if snapshot != last_snapshot:
+                LOGGER.info("NERIS 等待结果：%s；标签页：%s", subject, snapshot)
+                last_snapshot = snapshot
+            return _find_result(context, subject) is not None
+
         context.wait_until(
-            lambda: _find_result(context, subject) is not None,
+            result_ready,
             "请在 Chrome 中完成本次滑块验证；如页面仍未提交，请点击搜索。完成后将自动保存结果。",
             timeout_seconds=600,
             user_action=True,
         )
         result = _find_result(context, subject)
         assert result is not None
+        LOGGER.info("NERIS 已识别结果页：%s；标签页：%s", subject, _page_snapshot(context, subject))
         try:
             result.wait_for_load_state("domcontentloaded", timeout=30000)
             context.wait_until(

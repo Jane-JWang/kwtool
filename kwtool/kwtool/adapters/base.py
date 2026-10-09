@@ -68,7 +68,9 @@ class RunContext:
                 self.check_stop()
                 if time.monotonic() >= deadline:
                     raise TimeoutError(message)
-                time.sleep(0.25)
+                # Playwright dispatches popup/navigation events while a sync API
+                # call is running. Sleeping in Python can leave new tabs unseen.
+                self.page.wait_for_timeout(250)
             self.check_stop()
         finally:
             if user_action:
