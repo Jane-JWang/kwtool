@@ -78,7 +78,7 @@ class RunContext:
             if user_action:
                 self.report_user_action(False)
 
-    def save_pdf(self, page: Page | None = None, *, margin: dict[str, str] | None = None) -> Path:
+    def render_pdf(self, page: Page | None = None, *, margin: dict[str, str] | None = None) -> bytes:
         self.check_stop()
         settings = self.pdf_settings.validated()
         pdf = (page or self.page).pdf(
@@ -93,6 +93,10 @@ class RunContext:
             margin=margin or {side: f"{settings.margin_mm}mm" for side in ("top", "right", "bottom", "left")},
         )
         self.check_stop()
+        return pdf
+
+    def save_pdf(self, page: Page | None = None, *, margin: dict[str, str] | None = None) -> Path:
+        pdf = self.render_pdf(page, margin=margin)
         saved = save_pdf_bytes(pdf, self.pdf_path)
         self.pdf_path = saved
         self.artifacts.append(saved)
