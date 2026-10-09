@@ -16,8 +16,10 @@ from playwright.sync_api import Browser, BrowserContext, Error as PlaywrightErro
 
 from kwtool.adapters import registered_adapters
 from kwtool.adapters.base import RunCancelled, RunContext, SiteUnavailable
+from kwtool.diagnostics import browser_pages, browser_snapshot
 from kwtool.models import BatchRequest, BrowserLayout
-from kwtool.output import OutputPlan, available_path
+from kwtool.output import OutputPlan, available_path, safe_filename
+from kwtool.preferences import log_directory
 
 
 class BrowserWorker(QThread):
@@ -156,6 +158,8 @@ class BrowserWorker(QThread):
     def _run_batch(self, browser: BrowserContext, request: BatchRequest) -> bool:
         adapter = registered_adapters()[request.site_key]
         output = OutputPlan(self._output_base, request.output_template, datetime.now())
+        diagnostic_base = (log_directory() / "diagnostics" / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+                           if request.diagnostics else None)
         successes = 0
         failures = 0
         stopped = False
@@ -168,6 +172,7 @@ class BrowserWorker(QThread):
                 break
             self.progress.emit(f"正在处理 {index}/{len(request.subjects)}：{subject}")
             artifacts: list[Path] = []
+            run: RunContext | None = None
             try:
                 page = browser.pages[0] if browser.pages else browser.new_page()
                 run = RunContext(
@@ -180,6 +185,7 @@ class BrowserWorker(QThread):
                     report_status=self.progress.emit,
                     artifacts=artifacts,
                     report_user_action=self.user_action.emit,
+                    diagnostics_dir=diagnostic_base / safe_filename(f"{index:03d}-{subject}") if diagnostic_base else None,
                 )
                 adapter.run_one(run, subject)
                 run.check_stop()
@@ -190,6 +196,14 @@ class BrowserWorker(QThread):
                 break
             except Exception as exc:
                 logging.getLogger("kwtool").exception("主体处理失败：%s", subject)
+                if request.diagnostics and run is not None:
+                    try:
+                        logging.getLogger("kwtool").info("失败时标签页：%s", browser_snapshot(browser))
+                        for tab_index, tab in enumerate(browser_pages(browser), 1):
+                            if not tab.is_closed():
+                                run.capture_diagnostic(f"failure-tab-{tab_index}", tab)
+                    except Exception:
+                        logging.getLogger("kwtool").exception("无法读取失败时的浏览器状态")
                 failures += 1
                 detail = str(exc)
                 if artifacts:

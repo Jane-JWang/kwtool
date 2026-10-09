@@ -13,11 +13,11 @@ python -m pip install -e '.[dev]'
 python launcher.py
 ```
 
-演示时，在左侧每行输入一个主体，选择“本地演示”，点击“查询”。程序自动打印 PDF 并处理下一行。“停止”会在当前浏览器操作结束后终止批次。界面显示进度和状态，详细日志写入 `%APPDATA%\kwtool\kwtool.log`。
+演示时，在左侧每行输入一个主体，选择“本地演示”，点击“查询”。程序自动打印 PDF 并处理下一行。“停止”会在当前浏览器操作结束后终止批次。界面显示进度和状态，常规运行日志写入程序目录下的 `.log/kwtool.log`。勾选“开发者模式”后，网站适配器会记录详细状态，并可通过 `context.capture_diagnostic(label, page)` 将截图、页面文字和元素结构保存到 `.log/diagnostics/`。源码运行时程序目录是 `launcher.py` 所在目录；打包运行时是 EXE 所在目录。诊断文件不保存网址查询参数的值，可能包含网页上显示的主体和查询结果，请按需分享。
 
 选择“企信网”后，程序会在右侧 Chrome 搜索每家企业、依次加载详情栏目、保存网页 PDF，并通过网站发送邮件报告。首次访问会等待网站的环境检查；页面出现登录入口时，会提示用户在 Chrome 中登录。搜索和发送报告时出现的验证码由用户手动完成。搜索没有唯一完全匹配项时，在右侧网页点击正确的企业。PDF 已保存但邮件未获网站成功提示时，该行记为失败并继续下一家，已保存的 PDF 不会删除或自动重发邮件。企信网初始打印设置为 A4 纵向、55% 缩放、打印背景，可在“网页专属配置”中调整。
 
-默认输出模板为 `Output/[date]/[id]-[object]-[website].pdf`。相对路径基于用户“文档/kwtool”；支持 `[date]`（YYMMDD）、`[time]`（HHMMSS）、`[year]`、`[month]`、`[day]`、`[hour]`、`[minute]`、`[second]`、`[id]`（批次序号）、`[object]`、`[website]`。绝对路径也可使用。已有文件会自动增加 `_2`、`_3` 等后缀。Chrome 专用资料保存在 `%LOCALAPPDATA%\kwtool\chrome-profile\cdp`，界面设置保存在 `%APPDATA%\kwtool\settings.json`。程序默认自行启动独立 Chrome，再通过本机调试端口连接。
+默认输出模板为 `Output/[date]/[id]-[object]-[website].pdf`。相对路径基于用户“文档/kwtool”；支持 `[date]`（YYMMDD）、`[time]`（HHMMSS）、`[year]`、`[month]`、`[day]`、`[hour]`、`[minute]`、`[second]`、`[id]`（批次序号）、`[object]`（查询主体）、`[website]`（网站名称）。绝对路径也可使用。已有文件会自动增加 `_2`、`_3` 等后缀。Chrome 专用资料保存在 `%LOCALAPPDATA%\kwtool\chrome-profile\cdp`，界面设置保存在 `%APPDATA%\kwtool\settings.json`。程序默认自行启动独立 Chrome，再通过本机调试端口连接。
 
 如需单独验证 Chrome 的启动和连接，可以手动启动独立 Chrome，再让 kwtool 连接。先关闭 kwtool，在 PowerShell 中执行以下命令，并保持 Chrome 窗口打开：
 
@@ -39,7 +39,7 @@ $env:KWTOOL_CDP_URL = 'http://127.0.0.1:9229'
 
 ## 新增网站
 
-在 `kwtool/adapters/` 新建 `SiteAdapter` 子类，实现 `run_one(context, subject)`，并在 `kwtool/adapters/__init__.py` 的 `registered_adapters()` 中注册。适配器通过 `settings_schema` 声明网站专属设置；打印设置可能因网站而异，应由对应适配器处理。`context.page` 用于浏览器操作，`context.wait_until(ready, message)` 可根据网站状态检测验证码完成后自动继续，`context.save_pdf()` 和 `context.save_download(download)` 用于保存结果。长流程应定期调用 `context.check_stop()`。
+在 `kwtool/adapters/` 新建 `SiteAdapter` 子类，实现 `run_one(context, subject)`，并在 `kwtool/adapters/__init__.py` 的 `registered_adapters()` 中注册。适配器通过 `settings_schema` 声明网站专属设置；打印设置可能因网站而异，应由对应适配器处理。`context.page` 用于浏览器操作，`context.wait_until(ready, message)` 可根据网站状态检测验证码完成后自动继续，`context.save_pdf()` 和 `context.save_download(download)` 用于保存结果。`kwtool.diagnostics.browser_snapshot()` 可记录脱敏后的标签页状态，`context.capture_diagnostic(label, page)` 可在开发者模式保存页面证据。长流程应定期调用 `context.check_stop()`。
 
 ## 测试和打包
 
