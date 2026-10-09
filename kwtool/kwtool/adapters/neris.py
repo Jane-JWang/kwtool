@@ -74,7 +74,8 @@ class NerisAdapter(SiteAdapter):
     def run_one(self, context: RunContext, subject: str) -> None:
         context.check_stop()
         page = context.page
-        LOGGER.info("NERIS 查询开始：%s；标签页：%s", subject, _page_snapshot(context, subject))
+        if context.diagnostics_dir:
+            LOGGER.info("NERIS 查询开始：%s；标签页：%s", subject, _page_snapshot(context, subject))
         # A previous attempt can leave a result tab open. Remove it before
         # submitting this subject so it cannot be mistaken for the new result.
         for other in browser_pages(context.browser):
@@ -104,10 +105,11 @@ class NerisAdapter(SiteAdapter):
 
         def result_ready() -> bool:
             nonlocal last_snapshot
-            snapshot = _page_snapshot(context, subject)
-            if snapshot != last_snapshot:
-                LOGGER.info("NERIS 等待结果：%s；标签页：%s", subject, snapshot)
-                last_snapshot = snapshot
+            if context.diagnostics_dir:
+                snapshot = _page_snapshot(context, subject)
+                if snapshot != last_snapshot:
+                    LOGGER.info("NERIS 等待结果：%s；标签页：%s", subject, snapshot)
+                    last_snapshot = snapshot
             return _find_result(context, subject) is not None
 
         context.wait_until(
@@ -118,7 +120,8 @@ class NerisAdapter(SiteAdapter):
         )
         result = _find_result(context, subject)
         assert result is not None
-        LOGGER.info("NERIS 已识别结果页：%s；标签页：%s", subject, _page_snapshot(context, subject))
+        if context.diagnostics_dir:
+            LOGGER.info("NERIS 已识别结果页：%s；标签页：%s", subject, _page_snapshot(context, subject))
         context.capture_diagnostic("result-detected", result)
         try:
             result.wait_for_load_state("domcontentloaded", timeout=30000)
@@ -127,7 +130,7 @@ class NerisAdapter(SiteAdapter):
             def data_ready() -> bool:
                 nonlocal last_state
                 state = _result_state(result)
-                if state != last_state:
+                if context.diagnostics_dir and state != last_state:
                     LOGGER.info("NERIS 结果数据状态：%s；%s", subject, state)
                     last_state = state
                 return _data_ready(state)

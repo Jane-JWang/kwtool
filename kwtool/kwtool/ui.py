@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -34,7 +33,7 @@ from PySide6.QtWidgets import (
 from kwtool.adapters import registered_adapters
 from kwtool.models import BatchRequest, BrowserLayout, FieldSpec, PdfSettings
 from kwtool.output import OutputPlan, validate_template
-from kwtool.preferences import default_template, load_settings, profile_path, save_settings, settings_path
+from kwtool.preferences import default_template, load_settings, log_directory, profile_path, save_settings
 from kwtool.worker import BrowserWorker
 
 
@@ -70,17 +69,15 @@ class MainWindow(QWidget):
         self._last_row_error = ""
         self._browser_error = ""
         self._output_base = documents_base()
-        log_path = settings_path().parent / "kwtool.log"
-        try:
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            with log_path.open("a", encoding="utf-8"):
-                pass
-        except OSError:
-            log_path = Path(tempfile.gettempdir()) / "kwtool" / "kwtool.log"
-            log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path = log_directory() / "kwtool.log"
         self._logger = logging.getLogger("kwtool")
         self._logger.setLevel(logging.INFO)
-        handler = logging.FileHandler(log_path, encoding="utf-8")
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            handler = logging.FileHandler(log_path, encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.critical(self, "无法写入日志", f"请将程序放到可写目录后重试：\n{log_path}\n{exc}")
+            raise
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
         self._logger.addHandler(handler)
         self._total = 0
@@ -167,9 +164,9 @@ class MainWindow(QWidget):
         buttons.addWidget(self.stop_button)
         upper_layout.addLayout(buttons)
 
-        self.diagnostics_check = QCheckBox("诊断模式（保存页面截图和结构）")
-        self.diagnostics_check.setToolTip("每个查询阶段在应用日志目录下保存截图和页面结构，便于排查网站变化")
-        upper_layout.addWidget(self.diagnostics_check)
+        self.developer_mode_check = QCheckBox("开发者模式")
+        self.developer_mode_check.setToolTip("保存页面截图和结构到程序目录下的 .log 文件夹，便于排查网站变化")
+        upper_layout.addWidget(self.developer_mode_check)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setFormat("%v of %m")
@@ -225,7 +222,7 @@ class MainWindow(QWidget):
     def _restore_settings(self) -> None:
         self.subjects_edit.setPlainText(str(self._saved.get("subjects", "")))
         self.template_edit.setText(default_template(self._saved))
-        self.diagnostics_check.setChecked(bool(self._saved.get("diagnostics", False)))
+        self.developer_mode_check.setChecked(bool(self._saved.get("developer_mode", self._saved.get("diagnostics", False))))
         saved_key = self._saved.get("site_key")
         index = self.site_combo.findData(saved_key)
         if index >= 0:
@@ -317,7 +314,7 @@ class MainWindow(QWidget):
             "output_template": self.template_edit.text(),
             "site_settings": self._site_values,
             "site_pdf_settings": self._site_pdf_values,
-            "diagnostics": self.diagnostics_check.isChecked(),
+            "developer_mode": self.developer_mode_check.isChecked(),
         })
 
     def _open_output_directory(self) -> None:
@@ -351,7 +348,7 @@ class MainWindow(QWidget):
                 output_template=template,
                 pdf=self._pdf_settings(),
                 site_settings=dict(self._site_values.get(key, {})),
-                diagnostics=self.diagnostics_check.isChecked(),
+                diagnostics=self.developer_mode_check.isChecked(),
             )
             self._save_preferences()
         except (ValueError, OSError) as exc:

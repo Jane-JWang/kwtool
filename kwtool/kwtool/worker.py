@@ -19,7 +19,7 @@ from kwtool.adapters.base import RunCancelled, RunContext, SiteUnavailable
 from kwtool.diagnostics import browser_pages, browser_snapshot
 from kwtool.models import BatchRequest, BrowserLayout
 from kwtool.output import OutputPlan, available_path, safe_filename
-from kwtool.preferences import settings_path
+from kwtool.preferences import log_directory
 
 
 class BrowserWorker(QThread):
@@ -158,7 +158,7 @@ class BrowserWorker(QThread):
     def _run_batch(self, browser: BrowserContext, request: BatchRequest) -> bool:
         adapter = registered_adapters()[request.site_key]
         output = OutputPlan(self._output_base, request.output_template, datetime.now())
-        diagnostic_base = (settings_path().parent / "diagnostics" / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        diagnostic_base = (log_directory() / "diagnostics" / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
                            if request.diagnostics else None)
         successes = 0
         failures = 0

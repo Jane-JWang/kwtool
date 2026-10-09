@@ -2,9 +2,21 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 from kwtool.models import DEFAULT_TEMPLATE
+
+
+def application_directory() -> Path:
+    """Locate the launcher directory in source and packaged runs."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
+def log_directory() -> Path:
+    return application_directory() / ".log"
 
 
 def settings_path() -> Path:
