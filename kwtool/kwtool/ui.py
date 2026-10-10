@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -34,7 +35,9 @@ from PySide6.QtWidgets import (
 from kwtool.adapters import registered_adapters
 from kwtool.models import BatchRequest, BrowserLayout, FieldSpec, PdfSettings
 from kwtool.output import OutputPlan, validate_template
-from kwtool.preferences import default_template, load_settings, log_directory, profile_path, save_settings
+from kwtool.preferences import default_template, load_settings, log_directory, migrate_legacy_logs, profile_path, save_settings
+from kwtool import __version__
+from kwtool.updater import DownloadWorker, ReleaseWorker, launch_swap, version_key
 from kwtool.worker import BrowserWorker
 
 
@@ -71,6 +74,7 @@ class MainWindow(QWidget):
         self._browser_error = ""
         self._mail_summary = ""
         self._output_base = documents_base()
+        migrate_legacy_logs()
         log_path = log_directory() / "kwtool.log"
         self._logger = logging.getLogger("kwtool")
         self._logger.setLevel(logging.INFO)
@@ -78,7 +82,7 @@ class MainWindow(QWidget):
             log_path.parent.mkdir(parents=True, exist_ok=True)
             handler = logging.FileHandler(log_path, encoding="utf-8")
         except OSError as exc:
-            QMessageBox.critical(self, "无法写入日志", f"请将程序放到可写目录后重试：\n{log_path}\n{exc}")
+            QMessageBox.critical(self, "无法写入日志", f"请检查用户数据目录权限：\n{log_path}\n{exc}")
             raise
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
         self._logger.addHandler(handler)
@@ -86,6 +90,7 @@ class MainWindow(QWidget):
         self._layout_windows()
         self._build_ui()
         self._restore_settings()
+        self._releases: list[dict] = []
 
         self._create_worker()
         self._worker.start()
@@ -117,6 +122,28 @@ class MainWindow(QWidget):
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
+        system = QGroupBox("系统设置")
+        system_layout = QVBoxLayout(system)
+        system_layout.setContentsMargins(8, 8, 8, 8)
+        update_row = QHBoxLayout()
+        self.update_button = QPushButton("检查更新")
+        self.update_button.clicked.connect(self._check_updates)
+        update_row.addWidget(self.update_button)
+        self.developer_mode_check = QCheckBox("开发者模式")
+        self.developer_mode_check.setToolTip("保存页面截图和结构到用户数据目录下的 .log 文件夹")
+        update_row.addWidget(self.developer_mode_check)
+        system_layout.addLayout(update_row)
+        rollback_row = QHBoxLayout()
+        self.version_combo = QComboBox()
+        self.version_combo.setMinimumWidth(100)
+        self.version_combo.setPlaceholderText("选择历史版本")
+        self.rollback_button = QPushButton("回滚")
+        self.rollback_button.setEnabled(False)
+        self.rollback_button.clicked.connect(self._rollback)
+        rollback_row.addWidget(self.version_combo, 1)
+        rollback_row.addWidget(self.rollback_button)
+        system_layout.addLayout(rollback_row)
+        root.addWidget(system)
         splitter = QSplitter(Qt.Orientation.Vertical)
         root.addWidget(splitter)
 
@@ -166,10 +193,6 @@ class MainWindow(QWidget):
         buttons.addWidget(self.run_button)
         buttons.addWidget(self.stop_button)
         upper_layout.addLayout(buttons)
-
-        self.developer_mode_check = QCheckBox("开发者模式")
-        self.developer_mode_check.setToolTip("保存页面截图和结构到程序目录下的 .log 文件夹，便于排查网站变化")
-        upper_layout.addWidget(self.developer_mode_check)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setFormat("%v of %m")
@@ -337,6 +360,64 @@ class MainWindow(QWidget):
             "developer_mode": self.developer_mode_check.isChecked(),
         })
 
+    def _check_updates(self) -> None:
+        self.update_button.setEnabled(False)
+        self.update_button.setText("检查中…")
+        self._release_worker = ReleaseWorker()
+        self._release_worker.found.connect(self._show_releases)
+        self._release_worker.failed.connect(self._update_failed)
+        self._release_worker.start()
+
+    def _show_releases(self, releases: list[dict]) -> None:
+        self.update_button.setEnabled(True)
+        self.update_button.setText("检查更新")
+        self._releases = releases
+        self.version_combo.clear()
+        current = version_key(__version__)
+        for release in releases:
+            if current is not None and version_key(release["tag"]) < current:
+                self.version_combo.addItem(release["tag"], release)
+        self.rollback_button.setEnabled(self.version_combo.count() > 0 and getattr(sys, "frozen", False))
+        latest = releases[0] if releases else None
+        if latest and current is not None and version_key(latest["tag"]) > current:
+            if QMessageBox.question(self, "发现新版本", f"当前版本：{__version__}\n新版本：{latest['tag']}\n现在下载安装吗？") == QMessageBox.StandardButton.Yes:
+                self._install_release(latest)
+        else:
+            QMessageBox.information(self, "检查更新", f"当前版本 {__version__}，没有发现更新。")
+
+    def _update_failed(self, message: str) -> None:
+        self.update_button.setEnabled(True)
+        self.update_button.setText("检查更新")
+        QMessageBox.warning(self, "更新失败", message)
+
+    def _rollback(self) -> None:
+        release = self.version_combo.currentData()
+        if release and QMessageBox.question(self, "确认回滚", f"将程序切换到 {release['tag']}？") == QMessageBox.StandardButton.Yes:
+            self._install_release(release)
+
+    def _install_release(self, release: dict) -> None:
+        if not getattr(sys, "frozen", False):
+            QMessageBox.information(self, "仅支持打包版本", "请运行打包后的 kwtool.exe 来安装版本。")
+            return
+        if self._running:
+            QMessageBox.information(self, "查询进行中", "请等待当前查询结束后再更新。")
+            return
+        self.update_button.setEnabled(False)
+        self.rollback_button.setEnabled(False)
+        self.update_button.setText("下载中…")
+        self._download_worker = DownloadWorker(release, Path(sys.executable).resolve().parent)
+        self._download_worker.ready.connect(self._apply_release)
+        self._download_worker.failed.connect(self._update_failed)
+        self._download_worker.start()
+
+    def _apply_release(self, replacement: Path) -> None:
+        try:
+            launch_swap(replacement)
+        except Exception as exc:
+            self._update_failed(str(exc))
+            return
+        self.close()
+
     def _open_output_directory(self) -> None:
         try:
             template = validate_template(self.template_edit.text())
@@ -450,6 +531,10 @@ class MainWindow(QWidget):
             self.status_label.setText(message)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt method name
+        if hasattr(self, "_download_worker") and self._download_worker.isRunning():
+            QMessageBox.information(self, "正在下载", "请等待版本下载完成后关闭程序。")
+            event.ignore()
+            return
         if not self._closing:
             try:
                 self._save_preferences()

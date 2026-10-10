@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -16,7 +17,17 @@ def application_directory() -> Path:
 
 
 def log_directory() -> Path:
-    return application_directory() / ".log"
+    local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    return local / "kwtool" / ".log"
+
+
+def migrate_legacy_logs() -> None:
+    """Keep logs from installations that stored them beside the executable."""
+    old = application_directory() / ".log"
+    new = log_directory()
+    if old.is_dir() and old.resolve() != new.resolve():
+        shutil.copytree(old, new, dirs_exist_ok=True)
+        shutil.rmtree(old)
 
 
 def settings_path() -> Path:
