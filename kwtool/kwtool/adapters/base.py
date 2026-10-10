@@ -45,7 +45,7 @@ class RunContext:
     page: Page
     pdf_path: Path
     pdf_settings: PdfSettings
-    site_settings: dict[str, bool | str | int]
+    site_settings: dict[str, bool | str | int | float]
     stop_event: Event
     report_status: Callable[[str], None]
     artifacts: list[Path]

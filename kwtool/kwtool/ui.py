@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFormLayout,
     QFrame,
     QGroupBox,
@@ -229,10 +230,10 @@ class MainWindow(QWidget):
             self.site_combo.setCurrentIndex(index)
         self._render_site_fields()
 
-    def _read_field(self, spec: FieldSpec, widget: QWidget) -> bool | str | int:
+    def _read_field(self, spec: FieldSpec, widget: QWidget) -> bool | str | int | float:
         if spec.kind == "bool":
             return widget.isChecked()  # type: ignore[attr-defined]
-        if spec.kind == "integer":
+        if spec.kind in {"integer", "decimal"}:
             return widget.value()  # type: ignore[attr-defined]
         if spec.kind == "choice":
             return widget.currentText()  # type: ignore[attr-defined]
@@ -285,6 +286,16 @@ class MainWindow(QWidget):
                     widget.setValue(int(value))
                 except (TypeError, ValueError):
                     widget.setValue(int(spec.default))
+                self.site_form.addRow(spec.label, widget)
+            elif spec.kind == "decimal":
+                widget = QDoubleSpinBox()
+                widget.setDecimals(2)
+                widget.setRange(spec.minimum, spec.maximum)
+                widget.setSingleStep(spec.step)
+                try:
+                    widget.setValue(float(value))
+                except (TypeError, ValueError):
+                    widget.setValue(float(spec.default))
                 self.site_form.addRow(spec.label, widget)
             elif spec.kind == "choice":
                 widget = QComboBox()

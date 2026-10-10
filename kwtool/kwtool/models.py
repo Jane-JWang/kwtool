@@ -11,9 +11,12 @@ DEFAULT_TEMPLATE = "Output/[date]/[id]-[object]-[website].pdf"
 class FieldSpec:
     key: str
     label: str
-    kind: Literal["bool", "text", "integer", "choice"]
-    default: bool | str | int
+    kind: Literal["bool", "text", "integer", "decimal", "choice"]
+    default: bool | str | int | float
     choices: tuple[str, ...] = ()
+    minimum: float = 0.0
+    maximum: float = 10.0
+    step: float = 0.25
 
 
 @dataclass(frozen=True)
@@ -37,7 +40,7 @@ class BatchRequest:
     subjects: tuple[str, ...]
     output_template: str
     pdf: PdfSettings
-    site_settings: dict[str, bool | str | int] = field(default_factory=dict)
+    site_settings: dict[str, bool | str | int | float] = field(default_factory=dict)
     diagnostics: bool = False
 
 
