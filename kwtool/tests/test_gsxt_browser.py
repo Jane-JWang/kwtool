@@ -78,7 +78,7 @@ def test_gsxt_local_browser_flow(tmp_path: Path, subject: str, search_html: str,
                 artifacts=artifacts,
             )
             adapter.run_one(run, subject)
-            assert artifacts == [tmp_path / "测试企业.pdf"]
+            assert artifacts == [tmp_path / "测试企业_网站.pdf"]
             assert artifacts[0].read_bytes().startswith(b"%PDF")
             assert run.page.evaluate("window.__sends") == 1
             assert "栏目一内容" in run.page.locator("body").inner_text()
@@ -148,7 +148,7 @@ def test_gsxt_batch_restarts_search_and_closes_detail_tabs(tmp_path: Path) -> No
                     artifacts=[],
                 )
                 adapter.run_one(run, subject)
-                assert run.artifacts == [tmp_path / f"{subject}.pdf"]
+                assert run.artifacts == [tmp_path / f"{subject}_网站.pdf"]
                 assert run.page is search_page
                 assert browser_context.pages == [search_page]
                 assert search_page.locator("#keyword").input_value() == subject
