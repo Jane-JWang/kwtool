@@ -10,7 +10,6 @@ import pytest
 from pypdf import PdfWriter
 
 from kwtool.adapters.base import RunCancelled, RunContext, SiteUnavailable, print_header
-from kwtool.adapters.demo import DemoAdapter
 from kwtool.adapters import registered_adapters
 from kwtool.adapters.gsxt import GsxtAdapter
 from kwtool.models import BatchRequest, BrowserLayout, PdfSettings
@@ -72,22 +71,21 @@ def test_attachments_keep_extension_and_avoid_collisions(tmp_path: Path) -> None
     assert first.parent.name == "001-主体-网站_附件"
 
 
-def test_demo_adapter_prints_with_browser_headers(tmp_path: Path) -> None:
+def test_run_context_prints_with_browser_headers(tmp_path: Path) -> None:
     page = FakePage()
     messages: list[str] = []
     artifacts: list[Path] = []
     context = RunContext(
         browser=None,  # type: ignore[arg-type]
         page=page,  # type: ignore[arg-type]
-        pdf_path=tmp_path / "demo.pdf",
+        pdf_path=tmp_path / "result.pdf",
         pdf_settings=PdfSettings(landscape=True, scale=0.8, margin_mm=5, print_background=False),
-        site_settings={"manual_step": True, "page_title": "检查结果"},
+        site_settings={},
         stop_event=Event(),
         report_status=messages.append,
         artifacts=artifacts,
     )
-    DemoAdapter().run_one(context, "主体 <A>")
-    assert "主体 &lt;A&gt;" in page.html
+    context.save_pdf()
     assert page.pdf_options["display_header_footer"] is True
     assert page.pdf_options["format"] == "A4"
     assert page.pdf_options["landscape"] is True
@@ -99,7 +97,7 @@ def test_demo_adapter_prints_with_browser_headers(tmp_path: Path) -> None:
     assert 'class="url"' in page.pdf_options["footer_template"]
     assert 'class="pageNumber"' in page.pdf_options["footer_template"]
     assert 'position:absolute' in page.pdf_options["footer_template"]
-    assert artifacts == [tmp_path / "demo.pdf"]
+    assert artifacts == [tmp_path / "result.pdf"]
     assert artifacts[0].read_bytes().startswith(b"%PDF")
 
 
@@ -107,7 +105,7 @@ def test_print_header_formats_local_datetime_without_zero_padded_date() -> None:
     assert "2026/9/29 18:33" in print_header(datetime(2026, 9, 29, 18, 33))
 
 
-def test_stop_interrupts_manual_step(tmp_path: Path) -> None:
+def test_stop_interrupts_pdf_save(tmp_path: Path) -> None:
     stop = Event()
     stop.set()
     context = RunContext(
@@ -121,7 +119,7 @@ def test_stop_interrupts_manual_step(tmp_path: Path) -> None:
         artifacts=[],
     )
     with pytest.raises(RunCancelled):
-        DemoAdapter().run_one(context, "主体")
+        context.save_pdf()
     assert not (tmp_path / "stopped.pdf").exists()
 
 
@@ -204,7 +202,7 @@ def test_gsxt_is_registered_with_site_only_pdf_defaults() -> None:
     assert next(spec.default for spec in adapters["gsxt"].settings_schema if spec.key == "download_163_report") is False
     refresh = next(spec for spec in adapters["gsxt"].settings_schema if spec.key == "mail_refresh_seconds")
     assert (refresh.default, refresh.minimum, refresh.maximum) == (15, 5, 300)
-    assert adapters["demo"].default_pdf_settings.scale == 1.0
+    assert "demo" not in adapters
 
 
 def test_163_mail_date_parser_rejects_ambiguous_dates() -> None:
