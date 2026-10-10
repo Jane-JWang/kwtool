@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from threading import Event
@@ -51,6 +51,7 @@ class RunContext:
     artifacts: list[Path]
     report_user_action: Callable[[bool], None] = lambda _needed: None
     diagnostics_dir: Path | None = None
+    subject_kwargs: dict[str, str] = field(default_factory=dict)
 
     def check_stop(self) -> None:
         if self.stop_event.is_set():
@@ -124,6 +125,8 @@ class SiteAdapter(ABC):
     display_name: str
     settings_schema: tuple[FieldSpec, ...] = ()
     default_pdf_settings = PdfSettings(print_background=False)
+    required_kwargs: tuple[str, ...] = ()
+    optional_kwargs: tuple[str, ...] = ()
 
     @abstractmethod
     def run_one(self, context: RunContext, subject: str) -> None:

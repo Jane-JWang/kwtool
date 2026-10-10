@@ -20,6 +20,7 @@ from kwtool.diagnostics import browser_pages, browser_snapshot
 from kwtool.models import BatchRequest, BrowserLayout
 from kwtool.output import OutputPlan, available_path, safe_filename
 from kwtool.preferences import log_directory
+from kwtool.subjects import parse_subject
 
 
 class BrowserWorker(QThread):
@@ -174,11 +175,15 @@ class BrowserWorker(QThread):
             artifacts: list[Path] = []
             run: RunContext | None = None
             try:
+                name, kwargs = parse_subject(subject)
+                missing = [key for key in adapter.required_kwargs if not kwargs.get(key)]
+                if missing:
+                    raise ValueError(f"必填字段缺失：{'、'.join(missing)}")
                 page = browser.pages[0] if browser.pages else browser.new_page()
                 run = RunContext(
                     browser=browser,
                     page=page,
-                    pdf_path=available_path(output.render(index, subject, adapter.display_name)),
+                    pdf_path=available_path(output.render(index, name, adapter.display_name)),
                     pdf_settings=request.pdf,
                     site_settings=request.site_settings,
                     stop_event=self._stop,
@@ -186,8 +191,9 @@ class BrowserWorker(QThread):
                     artifacts=artifacts,
                     report_user_action=self.user_action.emit,
                     diagnostics_dir=diagnostic_base / safe_filename(f"{index:03d}-{subject}") if diagnostic_base else None,
+                    subject_kwargs=kwargs,
                 )
-                adapter.run_one(run, subject)
+                adapter.run_one(run, name)
                 run.check_stop()
                 successes += 1
                 self.row_result.emit(index, subject, True, ", ".join(str(p) for p in artifacts))
