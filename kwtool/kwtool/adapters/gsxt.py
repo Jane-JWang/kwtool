@@ -108,6 +108,7 @@ class GsxtAdapter(SiteAdapter):
     settings_schema = (
         FieldSpec("column_delay_ms", "栏目加载间隔（毫秒）", "integer", 350),
         FieldSpec("download_163_report", "批次结束后从 163 邮箱保存报告", "bool", False),
+        FieldSpec("mail_refresh_seconds", "163 邮箱刷新间隔（秒）", "integer", 15, minimum=5, maximum=300),
     )
 
     def _search_page(self, context: RunContext) -> Page:

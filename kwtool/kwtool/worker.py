@@ -231,7 +231,10 @@ class BrowserWorker(QThread):
         if (sent_reports and not stopped and request.site_key == "gsxt"
                 and request.site_settings.get("download_163_report", False)):
             try:
-                saved, unresolved = collect_reports(browser, sent_reports, self._stop, self.progress.emit, self.user_action.emit)
+                saved, unresolved = collect_reports(
+                    browser, sent_reports, self._stop, self.progress.emit, self.user_action.emit,
+                    refresh_seconds=request.site_settings.get("mail_refresh_seconds", 15),
+                )
                 self.mail_result.emit(len(saved), len(unresolved), "、".join(unresolved))
             except RunCancelled:
                 stopped = True

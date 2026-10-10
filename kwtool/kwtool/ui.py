@@ -287,7 +287,10 @@ class MainWindow(QWidget):
                 self.site_form.addRow(widget)
             elif spec.kind == "integer":
                 widget = QSpinBox()
-                widget.setRange(-1_000_000, 1_000_000)
+                if (spec.minimum, spec.maximum) == (0.0, 10.0):
+                    widget.setRange(-1_000_000, 1_000_000)
+                else:
+                    widget.setRange(int(spec.minimum), int(spec.maximum))
                 try:
                     widget.setValue(int(value))
                 except (TypeError, ValueError):

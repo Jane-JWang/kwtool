@@ -111,6 +111,14 @@ def _pdf_not_before_click(data: bytes, clicked: datetime, received: datetime) ->
     return received > clicked.replace(second=0, microsecond=0)
 
 
+def _refresh_seconds(value: object) -> int:
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError, OverflowError):
+        seconds = 15
+    return max(5, min(300, seconds))
+
+
 def _current_message_rows(frame: Frame, report: SentReport):
     now = datetime.now()
     matches = []
@@ -153,10 +161,11 @@ def _attachment_download_link(page: Page, filename: str):
 
 
 def collect_reports(browser: BrowserContext, reports: list[SentReport], stop: Event,
-                    progress, user_action) -> tuple[list[Path], list[str]]:
+                    progress, user_action, *, refresh_seconds: int = 15) -> tuple[list[Path], list[str]]:
     """Visit 163 Mail after a batch; return saved files and unresolved companies."""
     if not reports:
         return [], []
+    refresh_seconds = _refresh_seconds(refresh_seconds)
     existing = next((tab for tab in browser.pages if not tab.is_closed()
                      and tab.url.startswith("https://mail.163.com/js6/")), None)
     page = existing or browser.new_page()
@@ -222,7 +231,7 @@ def collect_reports(browser: BrowserContext, reports: list[SentReport], stop: Ev
             if time.monotonic() - last_notice >= 60:
                 progress(f"等待企信网邮件到达：已保存 {len(saved)}/{len(reports)}，仍待 {len(pending)} 份；邮箱将自动刷新…")
                 last_notice = time.monotonic()
-            for _ in range(30):
+            for _ in range(refresh_seconds * 2):
                 _check_stop(stop)
                 page.wait_for_timeout(500)
             page.reload(wait_until="domcontentloaded", timeout=30000)

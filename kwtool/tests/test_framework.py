@@ -14,7 +14,7 @@ from kwtool.adapters.demo import DemoAdapter
 from kwtool.adapters import registered_adapters
 from kwtool.adapters.gsxt import GsxtAdapter
 from kwtool.models import BatchRequest, BrowserLayout, PdfSettings
-from kwtool.mail163 import MAIL_TITLE, SENDER, SentReport, _message_date, _not_before_click, _pdf_not_before_click
+from kwtool.mail163 import MAIL_TITLE, SENDER, SentReport, _message_date, _not_before_click, _pdf_not_before_click, _refresh_seconds
 from kwtool.output import OutputPlan, safe_filename, save_download, save_pdf_bytes, validate_template
 from kwtool.worker import BrowserWorker
 from kwtool.ui import format_batch_summary
@@ -202,6 +202,8 @@ def test_gsxt_is_registered_with_site_only_pdf_defaults() -> None:
     assert adapters["gsxt"].default_pdf_settings.scale == 0.35
     assert adapters["gsxt"].default_pdf_settings.print_background is True
     assert next(spec.default for spec in adapters["gsxt"].settings_schema if spec.key == "download_163_report") is False
+    refresh = next(spec for spec in adapters["gsxt"].settings_schema if spec.key == "mail_refresh_seconds")
+    assert (refresh.default, refresh.minimum, refresh.maximum) == (15, 5, 300)
     assert adapters["demo"].default_pdf_settings.scale == 1.0
 
 
@@ -242,6 +244,10 @@ def test_163_report_pdf_creation_time_resolves_same_minute() -> None:
     assert not _pdf_not_before_click(pdf_at(None), clicked, received)
 
 
+def test_163_refresh_interval_is_bounded() -> None:
+    assert [_refresh_seconds(value) for value in (None, 2, 15, 45, 900)] == [15, 5, 15, 45, 300]
+
+
 def test_gsxt_batch_collects_only_confirmed_reports(tmp_path: Path, monkeypatch) -> None:
     class Adapter(GsxtAdapter):
         def run_one(self, context, subject):
@@ -253,8 +259,10 @@ def test_gsxt_batch_collects_only_confirmed_reports(tmp_path: Path, monkeypatch)
         pages = [FakePage()]
 
     received: list[SentReport] = []
-    def collect(browser, reports, stop, progress, user_action):
+    intervals: list[int] = []
+    def collect(browser, reports, stop, progress, user_action, *, refresh_seconds):
         received.extend(reports)
+        intervals.append(refresh_seconds)
         return [reports[0].pdf_path.with_name("报告.pdf")], []
 
     monkeypatch.setattr("kwtool.worker.registered_adapters", lambda: {"gsxt": Adapter()})
@@ -263,10 +271,11 @@ def test_gsxt_batch_collects_only_confirmed_reports(tmp_path: Path, monkeypatch)
     results: list[tuple] = []
     worker.mail_result.connect(lambda *args: results.append(args))
     request = BatchRequest("gsxt", ("已发送企业", "未发送企业"), "[id]-[object].pdf", PdfSettings(),
-                           site_settings={"download_163_report": True})
+                           site_settings={"download_163_report": True, "mail_refresh_seconds": 45})
     worker._run_batch(Browser(), request)  # type: ignore[arg-type]
     assert [report.subject for report in received] == ["已发送企业"]
     assert results == [(1, 0, "")]
+    assert intervals == [45]
 
 
 def test_gsxt_keeps_saved_pdf_when_mail_confirmation_fails(tmp_path: Path, monkeypatch) -> None:
