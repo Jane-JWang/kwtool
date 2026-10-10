@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 from datetime import datetime
+import io
 from pathlib import Path
 from threading import Event
 import re
 
 import pytest
+from pypdf import PdfWriter
 
 from kwtool.adapters.base import RunCancelled, RunContext, SiteUnavailable, print_header
 from kwtool.adapters.demo import DemoAdapter
 from kwtool.adapters import registered_adapters
 from kwtool.adapters.gsxt import GsxtAdapter
 from kwtool.models import BatchRequest, BrowserLayout, PdfSettings
+from kwtool.mail163 import MAIL_TITLE, SENDER, SentReport, _message_date, _not_before_click, _pdf_not_before_click
 from kwtool.output import OutputPlan, safe_filename, save_download, save_pdf_bytes, validate_template
 from kwtool.worker import BrowserWorker
 from kwtool.ui import format_batch_summary
@@ -196,9 +199,74 @@ def test_closed_chrome_is_relaunched_before_next_batch(tmp_path: Path, monkeypat
 def test_gsxt_is_registered_with_site_only_pdf_defaults() -> None:
     adapters = registered_adapters()
     assert isinstance(adapters["gsxt"], GsxtAdapter)
-    assert adapters["gsxt"].default_pdf_settings.scale == 0.55
+    assert adapters["gsxt"].default_pdf_settings.scale == 0.35
     assert adapters["gsxt"].default_pdf_settings.print_background is True
+    assert next(spec.default for spec in adapters["gsxt"].settings_schema if spec.key == "download_163_report") is False
     assert adapters["demo"].default_pdf_settings.scale == 1.0
+
+
+def test_163_mail_date_parser_rejects_ambiguous_dates() -> None:
+    now = datetime(2026, 10, 10, 15, 0)
+    assert SENDER == "gsxt@samr.gov.cn"
+    assert MAIL_TITLE == "国家企业信用信息公示系统-企业报告"
+    assert _message_date("2026-10-10 14:30", now) == datetime(2026, 10, 10, 14, 30)
+    assert _message_date("2026年10月10日 13:56 (星期六)", now) == datetime(2026, 10, 10, 13, 56)
+    assert _message_date("10/10 14:30", now) == datetime(2026, 10, 10, 14, 30)
+    assert _message_date("今天 14:30", now) == datetime(2026, 10, 10, 14, 30)
+    assert _message_date("14:30", now) is None
+
+
+def test_163_mail_must_be_newer_than_report_click() -> None:
+    clicked = datetime(2026, 10, 10, 14, 2, 22)
+    assert not _not_before_click(datetime(2026, 10, 10, 14, 1), clicked)
+    assert _not_before_click(datetime(2026, 10, 10, 14, 2), clicked)
+    assert _not_before_click(datetime(2026, 10, 10, 14, 3), clicked)
+    assert _not_before_click(datetime(2026, 10, 10, 14, 2), datetime(2026, 10, 10, 14, 2))
+
+
+def test_163_report_pdf_creation_time_resolves_same_minute() -> None:
+    clicked = datetime(2026, 10, 10, 16, 39, 1)
+    received = datetime(2026, 10, 10, 16, 39)
+
+    def pdf_at(creation: str | None) -> bytes:
+        writer = PdfWriter()
+        writer.add_blank_page(width=100, height=100)
+        if creation:
+            writer.add_metadata({"/CreationDate": creation})
+        stream = io.BytesIO()
+        writer.write(stream)
+        return stream.getvalue()
+
+    assert _pdf_not_before_click(pdf_at("D:20261010163920+08'00'"), clicked, received)
+    assert not _pdf_not_before_click(pdf_at("D:20261010163859+08'00'"), clicked, received)
+    assert not _pdf_not_before_click(pdf_at(None), clicked, received)
+
+
+def test_gsxt_batch_collects_only_confirmed_reports(tmp_path: Path, monkeypatch) -> None:
+    class Adapter(GsxtAdapter):
+        def run_one(self, context, subject):
+            context.save_pdf()
+            if subject == "已发送企业":
+                context.report_sent_at = datetime(2026, 10, 10, 14, 30)
+
+    class Browser:
+        pages = [FakePage()]
+
+    received: list[SentReport] = []
+    def collect(browser, reports, stop, progress, user_action):
+        received.extend(reports)
+        return [reports[0].pdf_path.with_name("报告.pdf")], []
+
+    monkeypatch.setattr("kwtool.worker.registered_adapters", lambda: {"gsxt": Adapter()})
+    monkeypatch.setattr("kwtool.worker.collect_reports", collect)
+    worker = BrowserWorker(tmp_path / "profile", tmp_path, BrowserLayout(0, 0, 800, 600))
+    results: list[tuple] = []
+    worker.mail_result.connect(lambda *args: results.append(args))
+    request = BatchRequest("gsxt", ("已发送企业", "未发送企业"), "[id]-[object].pdf", PdfSettings(),
+                           site_settings={"download_163_report": True})
+    worker._run_batch(Browser(), request)  # type: ignore[arg-type]
+    assert [report.subject for report in received] == ["已发送企业"]
+    assert results == [(1, 0, "")]
 
 
 def test_gsxt_keeps_saved_pdf_when_mail_confirmation_fails(tmp_path: Path, monkeypatch) -> None:
@@ -227,8 +295,8 @@ def test_gsxt_keeps_saved_pdf_when_mail_confirmation_fails(tmp_path: Path, monke
     with pytest.raises(TimeoutError, match="邮件未确认"):
         adapter.run_one(context, "某公司")
     assert events == ["columns", "mail"]
-    assert artifacts == [tmp_path / "report.pdf"]
-    assert page.pdf_options["scale"] == 0.55
+    assert artifacts == [tmp_path / "report_网站.pdf"]
+    assert page.pdf_options["scale"] == 0.35
     assert page.pdf_options["margin"]["left"] == "6.35mm"
 
 

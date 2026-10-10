@@ -18,6 +18,7 @@ from kwtool.adapters import registered_adapters
 from kwtool.adapters.base import RunCancelled, RunContext, SiteUnavailable
 from kwtool.diagnostics import browser_pages, browser_snapshot
 from kwtool.models import BatchRequest, BrowserLayout
+from kwtool.mail163 import SentReport, collect_reports
 from kwtool.output import OutputPlan, available_path, safe_filename
 from kwtool.preferences import log_directory
 from kwtool.subjects import parse_subject
@@ -30,6 +31,7 @@ class BrowserWorker(QThread):
     user_action = Signal(bool)
     row_result = Signal(int, str, bool, str)
     batch_result = Signal(int, int, bool)
+    mail_result = Signal(int, int, str)
 
     def __init__(self, profile_dir: Path, output_base: Path, layout: BrowserLayout) -> None:
         super().__init__()
@@ -165,6 +167,7 @@ class BrowserWorker(QThread):
         failures = 0
         stopped = False
         browser_closed = False
+        sent_reports: list[SentReport] = []
         self.batch_state.emit("running")
         self.user_action.emit(False)
         for index, subject in enumerate(request.subjects, 1):
@@ -195,6 +198,8 @@ class BrowserWorker(QThread):
                 )
                 adapter.run_one(run, name)
                 run.check_stop()
+                if request.site_key == "gsxt" and run.report_sent_at is not None:
+                    sent_reports.append(SentReport(name, run.report_sent_at, run.pdf_path))
                 successes += 1
                 self.row_result.emit(index, subject, True, ", ".join(str(p) for p in artifacts))
             except RunCancelled:
@@ -223,6 +228,16 @@ class BrowserWorker(QThread):
                     browser_closed = True
                     stopped = True
                     break
+        if (sent_reports and not stopped and request.site_key == "gsxt"
+                and request.site_settings.get("download_163_report", False)):
+            try:
+                saved, unresolved = collect_reports(browser, sent_reports, self._stop, self.progress.emit, self.user_action.emit)
+                self.mail_result.emit(len(saved), len(unresolved), "、".join(unresolved))
+            except RunCancelled:
+                stopped = True
+            except Exception as exc:
+                logging.getLogger("kwtool").exception("163 邮箱报告收集失败")
+                self.mail_result.emit(0, len(sent_reports), str(exc))
         self.batch_state.emit("idle")
         self.user_action.emit(False)
         self.batch_result.emit(successes, failures, stopped)

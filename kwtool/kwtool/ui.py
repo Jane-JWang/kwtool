@@ -69,6 +69,7 @@ class MainWindow(QWidget):
         self._running = False
         self._last_row_error = ""
         self._browser_error = ""
+        self._mail_summary = ""
         self._output_base = documents_base()
         log_path = log_directory() / "kwtool.log"
         self._logger = logging.getLogger("kwtool")
@@ -97,6 +98,7 @@ class MainWindow(QWidget):
         self._worker.user_action.connect(self._set_user_action)
         self._worker.row_result.connect(self._on_row_result)
         self._worker.batch_result.connect(self._on_batch_result)
+        self._worker.mail_result.connect(self._on_mail_result)
 
     def _layout_windows(self) -> None:
         screen = QApplication.primaryScreen()
@@ -371,6 +373,7 @@ class MainWindow(QWidget):
             return
         self._running = True
         self._last_row_error = ""
+        self._mail_summary = ""
         self._total = len(request.subjects)
         self.progress_bar.setRange(0, self._total)
         self.progress_bar.setValue(0)
@@ -426,9 +429,17 @@ class MainWindow(QWidget):
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         summary = format_batch_summary(successes, failures, stopped, self._total, self._last_row_error)
+        if self._mail_summary:
+            summary += "\n" + self._mail_summary
         self._set_user_action(bool(self._browser_error))
         self.status_label.setText(self._browser_error if stopped and successes == failures == 0 and self._browser_error else summary)
         self._log(summary)
+
+    def _on_mail_result(self, saved: int, unresolved: int, detail: str) -> None:
+        self._mail_summary = f"163 邮箱报告：已保存 {saved}，未保存 {unresolved}"
+        if detail:
+            self._mail_summary += f"；{detail}"
+        self._log(self._mail_summary)
 
     def _log(self, message: str) -> None:
         self._logger.info(message)
