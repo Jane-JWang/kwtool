@@ -8,9 +8,10 @@ from kwtool.adapters.gsxt import GsxtAdapter
 from kwtool.adapters.neris import NerisAdapter
 from kwtool.adapters.mof import MofAdapter
 from kwtool.adapters.sse import SseAdapter
+from kwtool.adapters.zxgk import ShixinAdapter, ZhixingAdapter
 
 
 def registered_adapters() -> dict[str, SiteAdapter]:
     """Register code-defined site adapters here."""
-    adapters: tuple[SiteAdapter, ...] = (DemoAdapter(), GsxtAdapter(), CreditChinaAdapter(), CsrcAdapter(), CfwsAdapter(), NerisAdapter(), MofAdapter(), SseAdapter(), BaiduAdapter())
+    adapters: tuple[SiteAdapter, ...] = (DemoAdapter(), GsxtAdapter(), CreditChinaAdapter(), CsrcAdapter(), CfwsAdapter(), NerisAdapter(), MofAdapter(), SseAdapter(), BaiduAdapter(), ShixinAdapter(), ZhixingAdapter())
     return {adapter.key: adapter for adapter in adapters}

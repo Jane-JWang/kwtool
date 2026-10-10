@@ -129,7 +129,7 @@ class MainWindow(QWidget):
 
         upper_layout.addWidget(QLabel("待查询主体（每行一个）"))
         self.subjects_edit = QPlainTextEdit()
-        self.subjects_edit.setPlaceholderText("每行输入一个主体名称")
+        self.subjects_edit.setPlaceholderText("每行一个主体，例如：张三(身份证:123456)")
         self.subjects_edit.setFixedHeight(110)
         upper_layout.addWidget(self.subjects_edit)
 
@@ -263,6 +263,10 @@ class MainWindow(QWidget):
             self._current_site_key = None
             return
         adapter = self._adapters[key]
+        if adapter.required_kwargs:
+            self.site_form.addRow(QLabel("必填字段:" + "、".join(adapter.required_kwargs)))
+        if adapter.optional_kwargs:
+            self.site_form.addRow(QLabel("可选字段:" + "、".join(adapter.optional_kwargs)))
         saved = self._site_values.get(key, {})
         defaults = adapter.default_pdf_settings
         pdf_saved = self._site_pdf_values.get(key, {})
