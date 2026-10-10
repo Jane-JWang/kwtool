@@ -7,6 +7,7 @@ the visible Chrome window. This adapter never reads or solves those challenges.
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from urllib.parse import urlparse
 
 from playwright.sync_api import Page
@@ -14,6 +15,7 @@ from playwright.sync_api import Error as PlaywrightError
 
 from kwtool.adapters.base import RunContext, SiteAdapter, SiteUnavailable
 from kwtool.models import FieldSpec, PdfSettings
+from kwtool.output import save_pdf_bytes
 
 
 HOME = "https://www.gsxt.gov.cn/"
@@ -102,8 +104,12 @@ def _stop_search_watch(page: Page, token: int) -> None:
 class GsxtAdapter(SiteAdapter):
     key = "gsxt"
     display_name = "企信网"
-    default_pdf_settings = PdfSettings(landscape=False, scale=0.55, print_background=True)
-    settings_schema = (FieldSpec("column_delay_ms", "栏目加载间隔（毫秒）", "integer", 350),)
+    default_pdf_settings = PdfSettings(landscape=False, scale=0.35, print_background=True)
+    settings_schema = (
+        FieldSpec("column_delay_ms", "栏目加载间隔（毫秒）", "integer", 350),
+        FieldSpec("download_163_report", "批次结束后从 163 邮箱保存报告", "bool", False),
+        FieldSpec("mail_refresh_seconds", "163 邮箱刷新间隔（秒）", "integer", 15, minimum=5, maximum=300),
+    )
 
     def _search_page(self, context: RunContext) -> Page:
         page = context.page
@@ -244,6 +250,7 @@ class GsxtAdapter(SiteAdapter):
                 start = page.get_by_text("发送报告", exact=True).first
             if not start.is_visible():
                 raise ValueError("详情页未找到‘发送报告’")
+            requested_at = datetime.now()
             start.click()
             context.wait_until(
                 lambda: _visible(page, "#send_pdf_dialog") or SUCCESS_TEXT in _body_text(page),
@@ -255,6 +262,7 @@ class GsxtAdapter(SiteAdapter):
                 send = page.locator("#send_pdf_dialog").get_by_text("发送", exact=True).first
                 if not send.is_visible():
                     raise ValueError("发送报告弹窗未找到‘发送’按钮")
+                requested_at = datetime.now()
                 send.click()
 
                 def confirmed() -> bool:
@@ -274,6 +282,7 @@ class GsxtAdapter(SiteAdapter):
 
                 context.wait_until(confirmed, "等待网站确认邮件报告已发送…", timeout_seconds=30)
             context.report_status("网站已确认发送邮件报告")
+            context.report_sent_at = requested_at
         finally:
             page.remove_listener("dialog", handle_dialog)
 
@@ -285,7 +294,10 @@ class GsxtAdapter(SiteAdapter):
             detail_page = self._find_company(context, subject)
             context.page = detail_page
             self._load_columns(context, detail_page)
-            saved = context.save_pdf(detail_page, margin={"top": "10.16mm", "right": "6.35mm", "bottom": "10.16mm", "left": "6.35mm"})
+            pdf = context.render_pdf(detail_page, margin={"top": "10.16mm", "right": "6.35mm", "bottom": "10.16mm", "left": "6.35mm"})
+            destination = context.pdf_path.with_name(f"{context.pdf_path.stem}_网站.pdf")
+            saved = save_pdf_bytes(pdf, destination)
+            context.artifacts.append(saved)
             context.report_status(f"已保存 PDF：{saved}；正在发送邮件报告")
             self._send_report(context, detail_page)
         finally:

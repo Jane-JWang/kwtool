@@ -52,6 +52,7 @@ class RunContext:
     report_user_action: Callable[[bool], None] = lambda _needed: None
     diagnostics_dir: Path | None = None
     subject_kwargs: dict[str, str] = field(default_factory=dict)
+    report_sent_at: datetime | None = None
 
     def check_stop(self) -> None:
         if self.stop_event.is_set():
