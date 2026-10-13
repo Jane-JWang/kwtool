@@ -29,10 +29,37 @@ class SamrAdapter(SiteAdapter):
         if not _allowed(context.page.url, ("samr.gov.cn",)):
             raise SiteUnavailable(f"国家市场监督管理总局搜索跳转至非预期网站：{context.page.url}")
 
+        last_results: tuple[str, ...] | None = None
+        stable_polls = 0
+
         def loaded() -> bool:
-            body = context.page.locator("body").inner_text(timeout=5000)
+            nonlocal last_results, stable_polls
             query = parse_qs(urlparse(context.page.url).query).get("q", [])
-            return subject in query and "查询范围" in body and "排序方式" in body
+            if subject not in query:
+                last_results = None
+                stable_polls = 0
+                return False
+
+            body = context.page.locator("body").inner_text(timeout=5000)
+            cards = context.page.locator(".comprehensiveItem.clearfix.ptlist_style")
+            card_count = cards.count()
+            if card_count:
+                # Search controls render before the API results. Wait until
+                # result cards stop changing to avoid printing a partial page.
+                current_results = tuple(card.inner_text() for card in cards.all())
+            elif "\u62b1\u6b49\uff0c\u5728\u5f53\u524d\u5206\u7c7b\u4e0b\u5747\u672a\u627e\u5230" in body:
+                current_results = ("__no_results__",)
+            else:
+                last_results = None
+                stable_polls = 0
+                return False
+
+            if current_results == last_results:
+                stable_polls += 1
+            else:
+                last_results = current_results
+                stable_polls = 1
+            return stable_polls >= 4
 
         try:
             context.wait_until(loaded, "等待国家市场监督管理总局检索结果", timeout_seconds=60)
