@@ -6,7 +6,10 @@ from zipfile import ZipFile
 
 from kwtool.adapters import registered_adapters
 from kwtool.adapters.base import RunContext
-from kwtool.adapters.zhongdeng import _find_detail_page, _safe_extract, _save_overall_document, _total_rows
+from kwtool.adapters.zhongdeng import (
+    _download_after_click, _find_detail_page, _safe_extract,
+    _save_overall_document, _total_rows,
+)
 from kwtool.models import PdfSettings
 
 
@@ -70,3 +73,33 @@ def test_detail_popup_is_selected_over_previous_result_tab():
     popup = Page("/query/guarantor/register/Result", "登记信息列表")
     context = SimpleNamespace(browser=SimpleNamespace(pages=[search, previous, popup]))
     assert _find_detail_page(context, search, {search, previous}) is popup
+
+
+def test_pending_proof_notice_ends_download_wait():
+    notices = []
+
+    class Page:
+        def on(self, *_):
+            pass
+
+        def remove_listener(self, *_):
+            pass
+
+        def is_closed(self):
+            return False
+
+        def locator(self, _):
+            return SimpleNamespace(all_inner_texts=lambda: notices)
+
+    page = Page()
+    browser = SimpleNamespace(pages=[page], on=lambda *_: None, remove_listener=lambda *_: None)
+    context = SimpleNamespace(browser=browser, wait_until=lambda predicate, *_args, **_kwargs: assert_ready(predicate))
+
+    def click():
+        notices.append("您的查询证明文件还未生成，请稍后在我的查询信息中下载")
+
+    assert _download_after_click(context, page, click, "等待", allow_deferred=True) is None
+
+
+def assert_ready(predicate):
+    assert predicate()

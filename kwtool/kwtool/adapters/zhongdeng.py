@@ -6,6 +6,7 @@ import math
 import re
 import time
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlparse
 from zipfile import BadZipFile, ZipFile
 
@@ -18,6 +19,7 @@ from kwtool.output import available_path, safe_filename
 
 HOME = "https://www.zhongdengwang.org.cn/out/#/home"
 QUERY = "https://www.zhongdengwang.org.cn/out/#/query/guarantor/"
+QUERY_RECORDS = "https://www.zhongdengwang.org.cn/out/#/work/queryRecords/"
 HOST = "www.zhongdengwang.org.cn"
 DOWNLOAD_LABEL = "下载本页面所有登记证明文件及附件"
 
@@ -104,6 +106,44 @@ def _save_overall_document(context: RunContext, download: Download, label: str) 
         raise RuntimeError(f"中登网{label}下载失败：{download.failure()}")
     context.artifacts.append(destination)
     return destination
+
+
+def _download_after_click(context: RunContext, page: Page, click: Callable[[], None],
+                          message: str, timeout_seconds: int = 120,
+                          allow_deferred: bool = False) -> Download | None:
+    """Catch downloads started by either the current tab or a new tab."""
+    downloads: list[Download] = []
+    watched_pages = list(context.browser.pages)
+
+    def on_download(download: Download) -> None:
+        downloads.append(download)
+
+    def on_page(new_page: Page) -> None:
+        watched_pages.append(new_page)
+        new_page.on("download", on_download)
+
+    for candidate in watched_pages:
+        candidate.on("download", on_download)
+    context.browser.on("page", on_page)
+    try:
+        click()
+
+        def finished() -> bool:
+            if downloads:
+                return True
+            if allow_deferred:
+                notices = page.locator(".el-message, .el-notification").all_inner_texts()
+                if any("查询证明文件还未生成" in notice for notice in notices):
+                    return True
+            return False
+
+        context.wait_until(finished, message, timeout_seconds=timeout_seconds)
+        return downloads[0] if downloads else None
+    finally:
+        context.browser.remove_listener("page", on_page)
+        for candidate in watched_pages:
+            if not candidate.is_closed():
+                candidate.remove_listener("download", on_download)
 
 
 class ZhongdengAdapter(SiteAdapter):
@@ -201,9 +241,11 @@ class ZhongdengAdapter(SiteAdapter):
                            "等待登记信息列表加载…", timeout_seconds=90)
         total = _total_rows(_text(page))
         assert total is not None
-        self._save_top_documents(context, page, identity)
+        pending_proof = self._save_top_documents(context, page, identity)
         if total == 0:
             self._pdf(context, page, "详情_第1页")
+            if pending_proof:
+                self._save_deferred_proof(context, page, pending_proof)
             return
 
         self._set_page_size(page)
@@ -215,6 +257,8 @@ class ZhongdengAdapter(SiteAdapter):
             self._download_page(context, page, number)
             if number < pages:
                 self._next_page(page, number)
+        if pending_proof:
+            self._save_deferred_proof(context, page, pending_proof)
 
     @staticmethod
     def _proof_yes(page: Page) -> None:
@@ -271,9 +315,12 @@ class ZhongdengAdapter(SiteAdapter):
         button = page.get_by_text(DOWNLOAD_LABEL, exact=True).first
         if not button.count() or not button.is_visible():
             raise RuntimeError(f"第 {number} 页未找到登记证明及附件下载按钮")
-        with page.expect_download(timeout=120000) as pending:
-            button.click()
-        download = pending.value
+        download = _download_after_click(
+            context, page, button.click,
+            f"等待中登网第 {number} 页附件下载…", timeout_seconds=180,
+        )
+        if download is None:
+            raise RuntimeError(f"中登网第 {number} 页附件未开始下载")
         folder = context.pdf_path.with_name(f"{context.pdf_path.stem}_附件")
         folder.mkdir(parents=True, exist_ok=True)
         archive = available_path(folder / f"第{number}页.zip")
@@ -291,21 +338,29 @@ class ZhongdengAdapter(SiteAdapter):
         context.report_status(f"中登网第 {number} 页已解压 {len(extracted)} 个附件到：{folder}")
 
     @staticmethod
-    def _save_top_documents(context: RunContext, page: Page, identity: str) -> None:
+    def _save_top_documents(context: RunContext, page: Page, identity: str) -> str | None:
         # The query certificate number is a direct PDF download. It appears
         # for both institution and individual queries when proof was selected.
         certificate = page.locator("a.el-link").filter(has_text=re.compile(r"^\d{15,}$")).first
+        pending_proof = None
         if certificate.count():
-            with page.expect_download(timeout=60000) as pending:
-                certificate.click()
-            saved = _save_overall_document(context, pending.value, "查询证明")
-            context.report_status(f"中登网查询证明文件已保存：{saved}")
+            proof_number = certificate.inner_text().strip()
+            download = _download_after_click(
+                context, page, certificate.click, "等待中登网查询证明文件下载…",
+                allow_deferred=True,
+            )
+            if download is None:
+                context.report_status("中登网查询证明尚未生成，稍后需在“我的查询信息”下载")
+                pending_proof = proof_number
+            else:
+                saved = _save_overall_document(context, download, "查询证明")
+                context.report_status(f"中登网查询证明文件已保存：{saved}")
 
         if identity:
-            return
+            return pending_proof
         register_list = page.locator("a.el-link").filter(has_text="登记信息列表").first
         if not register_list.count():
-            return
+            return pending_proof
         register_list.click()
         context.wait_until(
             lambda: "下载申请已提交" in _text(page),
@@ -348,11 +403,43 @@ class ZhongdengAdapter(SiteAdapter):
 
         context.wait_until(ready, "等待登记信息列表 Excel 生成…", timeout_seconds=300)
         assert row is not None
-        with page.expect_download(timeout=60000) as pending:
-            row.get_by_text("下载", exact=True).click()
-        saved = _save_overall_document(context, pending.value, "登记信息列表")
+        download = _download_after_click(
+            context, page, row.get_by_text("下载", exact=True).click,
+            "等待中登网登记信息列表下载…",
+        )
+        if download is None:
+            raise RuntimeError("中登网登记信息列表未开始下载")
+        saved = _save_overall_document(context, download, "登记信息列表")
         context.report_status(f"中登网登记信息列表已保存：{saved}")
         page.go_back(wait_until="domcontentloaded", timeout=60000)
         context.wait_until(lambda: "/query/guarantor/register/Result" in page.url
                            and "登记信息列表" in _text(page),
                            "返回中登网登记详情…", timeout_seconds=90)
+        return pending_proof
+
+    @staticmethod
+    def _save_deferred_proof(context: RunContext, page: Page, proof_number: str) -> None:
+        page.goto(QUERY_RECORDS, wait_until="domcontentloaded", timeout=60000)
+        field = page.locator(".el-form-item").filter(has_text="查询证明编号").locator("input.el-input__inner").first
+        context.wait_until(lambda: field.count() > 0,
+                           "等待中登网“我的查询信息”加载…", timeout_seconds=60)
+        field.fill(proof_number)
+        page.get_by_role("button", name="查询", exact=True).click()
+        row = page.locator("table tbody tr").filter(has_text=proof_number).first
+        context.wait_until(lambda: row.count() > 0,
+                           "等待查询证明记录…", timeout_seconds=60)
+        deadline = time.monotonic() + 300
+        while True:
+            context.check_stop()
+            download = _download_after_click(
+                context, page, row.get_by_role("button", name="下载").click,
+                "等待中登网生成查询证明；将按编号重试…",
+                timeout_seconds=60, allow_deferred=True,
+            )
+            if download is not None:
+                saved = _save_overall_document(context, download, "查询证明")
+                context.report_status(f"中登网查询证明文件已保存：{saved}")
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"中登网查询证明仍未生成：{proof_number}；可稍后在“我的查询信息”下载")
+            page.wait_for_timeout(5000)
