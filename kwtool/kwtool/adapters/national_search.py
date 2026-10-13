@@ -121,9 +121,23 @@ class _NationalSearchAdapter(SiteAdapter):
         finally:
             if self.site.submitted_field:
                 context.browser.remove_listener("request", on_request)
-        self._handle_results(context, page)
-        if self.site.close_result_tab and page is not context.page:
-            page.close()
+        try:
+            self._restore_search_term(page, subject)
+            self._handle_results(context, page)
+        finally:
+            if self.site.close_result_tab and page is not context.page:
+                page.close()
+
+    def _restore_search_term(self, page, subject: str) -> None:
+        if not self.site.result_inputs:
+            return
+        search = _first_visible(page, self.site.result_inputs)
+        if search is None:
+            raise RuntimeError(f"{self.display_name}\u7ed3\u679c\u9875\u672a\u627e\u5230\u641c\u7d22\u6846\uff0c\u672a\u4fdd\u5b58 PDF")
+        if search.input_value() != subject:
+            search.fill(subject)
+        if search.input_value() != subject:
+            raise RuntimeError(f"\u65e0\u6cd5\u5728{self.display_name}\u7ed3\u679c\u9875\u6062\u590d\u641c\u7d22\u5185\u5bb9\uff0c\u672a\u4fdd\u5b58 PDF")
 
     def _handle_results(self, context: RunContext, page) -> None:
         page.evaluate("document.fonts.ready")

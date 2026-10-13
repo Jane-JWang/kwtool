@@ -31,7 +31,7 @@ class Locator:
             return [self]
         if self.selector in self.page.controls:
             return [self]
-        if self.selector == "input" and self.page.result_input is not None:
+        if self.selector in ("input", "#searchword") and self.page.result_input is not None:
             return [self]
         return []
 
@@ -46,7 +46,10 @@ class Locator:
         return True
 
     def fill(self, value):
-        self.page.query = value
+        if self.selector == "#searchword" and self.page.result_input is not None:
+            self.page.result_input = value
+        else:
+            self.page.query = value
 
     def input_value(self):
         return self.page.result_input
@@ -111,7 +114,7 @@ class Browser:
 
 
 @pytest.mark.parametrize("adapter,popup_url,body,result_input,submitted_field,controls", [
-    (CcdiAdapter(), "https://www.ccdi.gov.cn/was5/web/search", "首页 > 搜索结果", None,
+    (CcdiAdapter(), "https://www.ccdi.gov.cn/was5/web/search", "首页 > 搜索结果", "",
      "searchword", ("#searchword", "form[name=searchFrom] input[type=submit]")),
     (Prosecutor12309Adapter(), "https://www.12309.gov.cn/searchui/?siteCode=zgrmjc#/12309/search",
      "共找到 0 条结果", SUBJECT, None, ("input[name=text]", "#btn1")),
@@ -137,6 +140,8 @@ def test_result_page_confirms_search_without_query_in_body(
     context.save_pdf = lambda page: saved_pages.append(page) or context.pdf_path
     adapter.run_one(context, SUBJECT)
     assert saved_pages == [popup]
+    if isinstance(adapter, CcdiAdapter):
+        assert popup.result_input == SUBJECT
     assert popup.closed is adapter.site.close_result_tab
     assert browser.listeners == []
 
