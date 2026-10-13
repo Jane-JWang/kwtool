@@ -15,6 +15,9 @@ class SearchSite:
     buttons: tuple[str, ...] = ("button:has-text('搜索')", "button:has-text('检索')", "input[type=submit]")
     result_markers: tuple[str, ...] = ("搜索结果", "检索结果", "查询结果", "相关结果", "没有找到", "暂无结果", "无相关结果")
     query_key: str | None = None
+    result_inputs: tuple[str, ...] = ()
+    submitted_field: str | None = None
+    close_result_tab: bool = False
 
 
 
@@ -59,14 +62,29 @@ class _NationalSearchAdapter(SiteAdapter):
         if search is None:
             context.capture_diagnostic("search-box-missing", page)
             raise RuntimeError(f"{self.display_name}未找到可用的检索框，请检查网站页面")
-        initial_url = page.url
-        search.fill(subject)
-        existing_pages = set(context.browser.pages)
-        submit = _first_visible(page, self.site.buttons)
-        if submit is not None:
-            submit.click()
-        else:
-            search.press("Enter")
+        submitted = False
+
+        def on_request(request) -> None:
+            nonlocal submitted
+            if (self.site.submitted_field and _allowed(request.url, self.site.hosts)
+                    and request.method == "POST" and request.post_data):
+                values = parse_qs(request.post_data).get(self.site.submitted_field, [])
+                submitted = submitted or subject in values
+
+        if self.site.submitted_field:
+            context.browser.on("request", on_request)
+        try:
+            search.fill(subject)
+            existing_pages = set(context.browser.pages)
+            submit = _first_visible(page, self.site.buttons)
+            if submit is not None:
+                submit.click()
+            else:
+                search.press("Enter")
+        except Exception:
+            if self.site.submitted_field:
+                context.browser.remove_listener("request", on_request)
+            raise
 
         def has_results() -> bool:
             nonlocal page
@@ -76,22 +94,50 @@ class _NationalSearchAdapter(SiteAdapter):
             if not _allowed(page.url, self.site.hosts):
                 return False
             body = page.locator("body").inner_text(timeout=5000)
+            if any(word in body for word in ("访问行为存在异常", "405- Method Not Allowed")):
+                context.capture_diagnostic("search-access-blocked", page)
+                raise SiteUnavailable(f"{self.display_name}拦截了检索请求，请在浏览器中检查站点提示")
             # Some sites show a challenge before results.  Wait for a person
             # to solve it, rather than printing the challenge as a result.
             if any(word in body for word in ("请输入验证码", "请完成验证", "请先登录")):
                 return False
             query_matches = (self.site.query_key is not None and
                              subject in parse_qs(urlparse(page.url).query).get(self.site.query_key, []))
-            return (subject in body or query_matches) and (
-                page.url != initial_url or any(marker in body for marker in self.site.result_markers)
-            ) and any(marker in body for marker in self.site.result_markers)
+            input_matches = any(
+                candidate.input_value() == subject
+                for selector in self.site.result_inputs
+                for candidate in page.locator(selector).all()
+                if candidate.is_visible()
+            )
+            query_proven = subject in body or query_matches or input_matches or submitted
+            result_loaded = any(marker in body for marker in self.site.result_markers)
+            return query_proven and result_loaded
 
         try:
             context.wait_until(has_results, f"等待{self.display_name}检索结果；如出现验证，请在浏览器中完成", timeout_seconds=180, user_action=True)
         except TimeoutError:
             context.capture_diagnostic("search-results-timeout", page)
             raise RuntimeError(f"{self.display_name}未能确认检索结果，未保存 PDF")
-        self._handle_results(context, page)
+        finally:
+            if self.site.submitted_field:
+                context.browser.remove_listener("request", on_request)
+        try:
+            self._restore_search_term(page, subject)
+            self._handle_results(context, page)
+        finally:
+            if self.site.close_result_tab and page is not context.page:
+                page.close()
+
+    def _restore_search_term(self, page, subject: str) -> None:
+        if not self.site.result_inputs:
+            return
+        search = _first_visible(page, self.site.result_inputs)
+        if search is None:
+            raise RuntimeError(f"{self.display_name}\u7ed3\u679c\u9875\u672a\u627e\u5230\u641c\u7d22\u6846\uff0c\u672a\u4fdd\u5b58 PDF")
+        if search.input_value() != subject:
+            search.fill(subject)
+        if search.input_value() != subject:
+            raise RuntimeError(f"\u65e0\u6cd5\u5728{self.display_name}\u7ed3\u679c\u9875\u6062\u590d\u641c\u7d22\u5185\u5bb9\uff0c\u672a\u4fdd\u5b58 PDF")
 
     def _handle_results(self, context: RunContext, page) -> None:
         page.evaluate("document.fonts.ready")

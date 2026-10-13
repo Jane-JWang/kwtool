@@ -9,3 +9,4 @@ dist/
 .log/
 update_repo.txt
 .vscode/
+Output/

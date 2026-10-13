@@ -7,5 +7,8 @@ class CcdiAdapter(_NationalSearchAdapter):
     key = "ccdi"
     display_name = "中央纪委国家监委"
     site = SearchSite("https://www.ccdi.gov.cn/", ("ccdi.gov.cn",),
-                      ("#searchword",), ("form[name=searchFrom] input[type=submit]",))
+                      ("#searchword",), ("form[name=searchFrom] input[type=submit]",),
+                      result_inputs=("#searchword",),
+                      result_markers=("搜索结果",), submitted_field="searchword",
+                      close_result_tab=True)
 

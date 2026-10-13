@@ -110,6 +110,7 @@ def test_filing_roster_saves_announcement_and_original_attachment(
         tmp_path / "roster.pdf",
     ]
     assert "无法判定" in context.artifacts[1].read_text(encoding="utf-8")
+    assert "说明：" not in context.artifacts[1].read_text(encoding="utf-8")
     assert page.pdf_options["scale"] == 0.35
     assert page.pdf_options["display_header_footer"] is True
 

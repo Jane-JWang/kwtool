@@ -18,6 +18,7 @@ from kwtool.adapters.prosecutor_12309 import Prosecutor12309Adapter
 from kwtool.adapters.wenshu import WenshuAdapter
 from kwtool.adapters.sse import SseAdapter
 from kwtool.adapters.zxgk import ShixinAdapter, ZhixingAdapter
+from kwtool.adapters.zhongdeng import ZhongdengAdapter
 
 
 def registered_adapters() -> dict[str, SiteAdapter]:
@@ -28,6 +29,6 @@ def registered_adapters() -> dict[str, SiteAdapter]:
         ShixinAdapter(), ZhixingAdapter(), WenshuAdapter(), MeeAdapter(),
         MemAdapter(), SamrAdapter(), NdrcAdapter(), StaAdapter(),
         CcdiAdapter(), Prosecutor12309Adapter(), CsrcRatingFilingAdapter(),
-        CsrcAccountingFilingAdapter(), CnabsAdapter(),
+        CsrcAccountingFilingAdapter(), CnabsAdapter(), ZhongdengAdapter(),
     )
     return {adapter.key: adapter for adapter in adapters}
