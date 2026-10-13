@@ -13,6 +13,7 @@ def test_birth_date_and_settings():
     assert _birth_date("350100198005060012") == "1980年5月6日"
     assert _birth_date("350100800506001") == "1980年5月6日"
     assert adapter.optional_kwargs == ("身份证",)
+    assert adapter.site.result_markers == ("共检索到",)
     assert [field.label for field in adapter.settings_schema] == ["受贿调查", "加入出生日期筛选"]
     with pytest.raises(ValueError, match="出生日期无效"):
         _birth_date("350100198013060012")

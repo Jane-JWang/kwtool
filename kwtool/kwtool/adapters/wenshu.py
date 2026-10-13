@@ -46,7 +46,8 @@ class WenshuAdapter(_NationalSearchAdapter):
     )
     site = SearchSite("https://wenshu.court.gov.cn/", ("court.gov.cn",),
                       ("input[placeholder*='案由、关键词']",),
-                      (".search-rightBtn.search-click",), query_key="s21")
+                      (".search-rightBtn.search-click",),
+                      result_markers=("共检索到",), query_key="s21")
 
     def run_one(self, context: RunContext, subject: str) -> None:
         identity = context.subject_kwargs.get("身份证", "")
