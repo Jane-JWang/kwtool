@@ -17,6 +17,7 @@ class SearchSite:
     query_key: str | None = None
     result_inputs: tuple[str, ...] = ()
     submitted_field: str | None = None
+    close_result_tab: bool = False
 
 
 
@@ -121,6 +122,8 @@ class _NationalSearchAdapter(SiteAdapter):
             if self.site.submitted_field:
                 context.browser.remove_listener("request", on_request)
         self._handle_results(context, page)
+        if self.site.close_result_tab and page is not context.page:
+            page.close()
 
     def _handle_results(self, context: RunContext, page) -> None:
         page.evaluate("document.fonts.ready")

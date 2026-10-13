@@ -1,12 +1,16 @@
+import io
 from pathlib import Path
 from threading import Event
 from urllib.parse import urlencode
 
 import pytest
+from pypdf import PdfReader, PdfWriter
 
 from kwtool.adapters.base import RunContext, SiteUnavailable
 from kwtool.adapters.ccdi import CcdiAdapter
+from kwtool.adapters.mem import MemAdapter
 from kwtool.adapters.ndrc import NdrcAdapter
+from kwtool.adapters.national_search import _NationalSearchAdapter
 from kwtool.adapters.prosecutor_12309 import Prosecutor12309Adapter
 from kwtool.adapters.sta import StaAdapter
 
@@ -62,6 +66,10 @@ class Page:
         self.controls = set(controls)
         self.result_input = result_input
         self.query = ""
+        self.closed = False
+
+    def close(self):
+        self.closed = True
 
     def goto(self, url, **kwargs):
         self.url = url
@@ -111,8 +119,10 @@ class Browser:
      "相关结果0个", None, None, ("#header-search-txt", "#header-search-btn")),
 ])
 def test_result_page_confirms_search_without_query_in_body(
-    adapter, popup_url, body, result_input, submitted_field, controls, tmp_path: Path,
+    adapter, popup_url, body, result_input, submitted_field, controls, tmp_path: Path, monkeypatch,
 ):
+    if isinstance(adapter, Prosecutor12309Adapter):
+        monkeypatch.setattr(adapter, "_handle_results", lambda context, page: context.save_pdf(page))
     popup = Page(None, popup_url, body, result_input=result_input)
     browser = Browser(popup, submitted_field)
     popup.browser = browser
@@ -127,6 +137,7 @@ def test_result_page_confirms_search_without_query_in_body(
     context.save_pdf = lambda page: saved_pages.append(page) or context.pdf_path
     adapter.run_one(context, SUBJECT)
     assert saved_pages == [popup]
+    assert popup.closed is adapter.site.close_result_tab
     assert browser.listeners == []
 
 
@@ -161,3 +172,90 @@ def test_blocked_result_page_fails_without_printing(tmp_path: Path):
         adapter.run_one(context, SUBJECT)
     assert browser.listeners == []
     assert not context.artifacts
+
+
+def test_12309_combines_available_pages(tmp_path: Path):
+    class ResultLocator:
+        def __init__(self, page, selector):
+            self.page, self.selector = page, selector
+
+        def all(self):
+            return [self] if self.selector == ".text-left-list" else []
+
+        def count(self):
+            return 1
+
+        def inner_text(self):
+            if self.selector == ".text-left-list":
+                return f"第 {self.page.number} 页文章"
+            if self.selector == ".el-pager li.number.active":
+                return str(self.page.number)
+            return "共 20 条"
+
+        def is_disabled(self):
+            return self.page.number == 2
+
+        def click(self):
+            self.page.number += 1
+
+    class ResultPage:
+        number = 1
+
+        def locator(self, selector):
+            return ResultLocator(self, selector)
+
+        def evaluate(self, script):
+            pass
+
+        def emulate_media(self, **kwargs):
+            pass
+
+    page = ResultPage()
+    adapter = Prosecutor12309Adapter()
+    adapter._max_pages = 3
+    context = RunContext(
+        browser=None, page=page, pdf_path=tmp_path / "result.pdf",
+        pdf_settings=adapter.default_pdf_settings, site_settings={"max_pages": 3},
+        stop_event=Event(), report_status=lambda message: None, artifacts=[],
+    )
+
+    def render(current):
+        writer = PdfWriter()
+        writer.add_blank_page(width=100 + current.number, height=100)
+        output = io.BytesIO()
+        writer.write(output)
+        return output.getvalue()
+
+    context.render_pdf = render
+    adapter._handle_results(context, page)
+    assert len(context.artifacts) == 1
+    assert [float(item.mediabox.width) for item in PdfReader(context.artifacts[0]).pages] == [101, 102]
+
+
+def test_mem_restores_search_box_before_print(monkeypatch, tmp_path: Path):
+    class SearchBox:
+        value = ""
+
+        def is_visible(self):
+            return True
+
+        def fill(self, value):
+            self.value = value
+
+        def input_value(self):
+            return self.value
+
+    box = SearchBox()
+    page = type("Page", (), {"locator": lambda self, selector: box})()
+    adapter = MemAdapter()
+    adapter._subject = SUBJECT
+    context = RunContext(
+        browser=None, page=page, pdf_path=tmp_path / "result.pdf",
+        pdf_settings=adapter.default_pdf_settings, site_settings={},
+        stop_event=Event(), report_status=lambda message: None, artifacts=[],
+    )
+    printed = []
+    monkeypatch.setattr(_NationalSearchAdapter, "_handle_results",
+                        lambda self, run, current: printed.append(box.value))
+    adapter._handle_results(context, page)
+    assert printed == [SUBJECT]
