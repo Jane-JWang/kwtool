@@ -91,6 +91,9 @@ class _NationalSearchAdapter(SiteAdapter):
         except TimeoutError:
             context.capture_diagnostic("search-results-timeout", page)
             raise RuntimeError(f"{self.display_name}未能确认检索结果，未保存 PDF")
+        self._handle_results(context, page)
+
+    def _handle_results(self, context: RunContext, page) -> None:
         page.evaluate("document.fonts.ready")
         page.emulate_media(media="screen")
         page.evaluate("window.scrollTo(0, 0)")
