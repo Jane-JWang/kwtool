@@ -45,6 +45,10 @@ def _total_rows(text: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _page_range_ready(text: str, first: int, last: int) -> bool:
+    return bool(re.search(rf"显示第\s*{first}\s*到\s*第?\s*{last}\s*条记录", text))
+
+
 def _find_detail_page(context: RunContext, search_page: Page, existing_pages: set[Page]) -> Page | None:
     candidates = [search_page, *(page for page in context.browser.pages if page not in existing_pages)]
     for candidate in candidates:
@@ -291,7 +295,7 @@ class ZhongdengAdapter(SiteAdapter):
         expected = min(total, number * 30)
         first = (number - 1) * 30 + 1
         context.wait_until(
-            lambda: bool(re.search(rf"显示第\s*{first}\s*到\s*{expected}\s*条记录", _text(page))),
+            lambda: _page_range_ready(_text(page), first, expected),
             f"等待中登网第 {number} 页登记记录…", timeout_seconds=60,
         )
 

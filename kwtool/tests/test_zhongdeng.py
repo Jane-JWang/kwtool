@@ -8,7 +8,7 @@ from kwtool.adapters import registered_adapters
 from kwtool.adapters.base import RunContext
 from kwtool.adapters.zhongdeng import (
     _download_after_click, _find_detail_page, _safe_extract,
-    _save_overall_document, _total_rows,
+    _page_range_ready, _save_overall_document, _total_rows,
 )
 from kwtool.models import PdfSettings
 
@@ -22,6 +22,8 @@ def test_zhongdeng_registered_and_uses_identity_keyword():
 def test_result_count_and_safe_attachment_extraction(tmp_path):
     assert _total_rows("共 36 条记录") == 36
     assert _total_rows("加载中") is None
+    assert _page_range_ready("显示第 1 到第 26 条记录，共 26 条记录", 1, 26)
+    assert _page_range_ready("显示第 31 到 36 条记录", 31, 36)
     data = BytesIO()
     with ZipFile(data, "w") as archive:
         archive.writestr("证明/文件.pdf", b"PDF")
