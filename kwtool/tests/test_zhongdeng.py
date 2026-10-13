@@ -4,10 +4,12 @@ from threading import Event
 from types import SimpleNamespace
 from zipfile import ZipFile
 
+from pypdf import PdfReader, PdfWriter
+
 from kwtool.adapters import registered_adapters
 from kwtool.adapters.base import RunContext
 from kwtool.adapters.zhongdeng import (
-    _download_after_click, _find_detail_page, _safe_extract,
+    ZhongdengAdapter, _download_after_click, _find_detail_page, _merge_detail_pdfs, _safe_extract,
     _page_range_ready, _save_overall_document, _subject_output_path, _total_rows,
 )
 from kwtool.models import PdfSettings
@@ -108,6 +110,46 @@ def test_pending_proof_notice_ends_download_wait():
         notices.append("您的查询证明文件还未生成，请稍后在我的查询信息中下载")
 
     assert _download_after_click(context, page, click, "等待", allow_deferred=True) is None
+
+
+def test_detail_waits_for_actual_rows_after_page_size_changes():
+    class Page:
+        def __init__(self):
+            self.rows = list(range(1, 11))
+
+        def locator(self, selector):
+            assert selector == "body"
+            return SimpleNamespace(inner_text=lambda timeout: "显示第 1 到第 26 条记录，共 26 条记录")
+
+        def evaluate(self, _script):
+            return self.rows
+
+    page = Page()
+    checks = []
+
+    def wait_until(ready, *_args, **_kwargs):
+        checks.append(ready())
+        page.rows = list(range(1, 27))
+        checks.append(ready())
+
+    ZhongdengAdapter._wait_page(SimpleNamespace(wait_until=wait_until), page, 1, 26)
+    assert checks == [False, True]
+
+
+def test_detail_pdfs_are_combined_and_parts_removed(tmp_path: Path):
+    parts = [tmp_path / f"主体_详情_第{number}页.pdf" for number in (1, 2)]
+    for part in parts:
+        writer = PdfWriter()
+        writer.add_blank_page(width=595, height=842)
+        with part.open("wb") as output:
+            writer.write(output)
+        writer.close()
+    context = SimpleNamespace(pdf_path=tmp_path / "主体.pdf", artifacts=parts.copy())
+    merged = _merge_detail_pdfs(context, parts)
+    assert merged.name == "主体_详情.pdf"
+    assert len(PdfReader(merged).pages) == 2
+    assert context.artifacts == [merged]
+    assert not any(part.exists() for part in parts)
 
 
 def assert_ready(predicate):

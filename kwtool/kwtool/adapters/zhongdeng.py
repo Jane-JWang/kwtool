@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from zipfile import BadZipFile, ZipFile
 
 from playwright.sync_api import Download, Error as PlaywrightError, Page
+from pypdf import PdfReader, PdfWriter
 
 from kwtool.adapters.base import RunContext, SiteAdapter, SiteUnavailable
 from kwtool.models import PdfSettings
@@ -47,6 +48,44 @@ def _total_rows(text: str) -> int | None:
 
 def _page_range_ready(text: str, first: int, last: int) -> bool:
     return bool(re.search(rf"显示第\s*{first}\s*到\s*第?\s*{last}\s*条记录", text))
+
+
+def _detail_row_numbers(page: Page) -> list[int]:
+    """Read rendered registration rows, excluding summary and hidden tables."""
+    return page.evaluate("""() => Array.from(document.querySelectorAll('table tbody tr'))
+        .filter(row => row.getClientRects().length && /^\\d+$/.test(row.cells?.[0]?.innerText.trim() || '')
+            && /\\d{15,}/.test(row.innerText))
+        .map(row => Number(row.cells[0].innerText.trim()))""")
+
+
+def _last_detail_id(page: Page) -> str:
+    return page.evaluate("""() => {
+        const rows = Array.from(document.querySelectorAll('table tbody tr'))
+            .filter(row => row.getClientRects().length && /^\\d+$/.test(row.cells?.[0]?.innerText.trim() || '')
+                && /\\d{15,}/.test(row.innerText));
+        return rows.at(-1)?.innerText.match(/\\d{15,}/)?.[0] || '';
+    }""")
+
+
+def _merge_detail_pdfs(context: RunContext, parts: list[Path]) -> Path:
+    """Keep page PDFs until the combined file has been written successfully."""
+    destination = available_path(context.pdf_path.with_name(f"{context.pdf_path.stem}_详情.pdf"))
+    writer = PdfWriter()
+    try:
+        for part in parts:
+            writer.append(str(part))
+        with destination.open("xb") as stream:
+            writer.write(stream)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        writer.close()
+    context.artifacts = [artifact for artifact in context.artifacts if artifact not in parts]
+    context.artifacts.append(destination)
+    for part in parts:
+        part.unlink()
+    return destination
 
 
 def _find_detail_page(context: RunContext, search_page: Page, existing_pages: set[Page]) -> Page | None:
@@ -256,20 +295,28 @@ class ZhongdengAdapter(SiteAdapter):
         assert total is not None
         pending_proof = self._save_top_documents(context, page, identity)
         if total == 0:
-            self._pdf(context, page, "详情_第1页")
+            self._pdf(context, page, "详情")
             if pending_proof:
                 self._save_deferred_proof(context, page, pending_proof)
             return
 
-        self._set_page_size(page)
+        self._set_page_size(page, total)
         pages = math.ceil(total / 30)
+        detail_parts: list[Path] = []
         for number in range(1, pages + 1):
             context.check_stop()
             self._wait_page(context, page, number, total)
-            self._pdf(context, page, f"详情_第{number}页")
+            last_id = _last_detail_id(page)
+            part = self._pdf(context, page, f"详情_第{number}页")
+            detail_parts.append(part)
+            printed = "".join(part_page.extract_text() or "" for part_page in PdfReader(part).pages)
+            if not last_id or last_id not in re.sub(r"\s+", "", printed):
+                raise RuntimeError(f"中登网第 {number} 页 PDF 缺少最后一条登记记录，已保留分页面供排查")
             self._download_page(context, page, number)
             if number < pages:
                 self._next_page(page, number)
+        merged = _merge_detail_pdfs(context, detail_parts)
+        context.report_status(f"中登网 {pages} 页登记详情已合并：{merged}")
         if pending_proof:
             self._save_deferred_proof(context, page, pending_proof)
 
@@ -282,8 +329,10 @@ class ZhongdengAdapter(SiteAdapter):
                 yes.click()
 
     @staticmethod
-    def _set_page_size(page: Page) -> None:
-        if re.search(r"每页显示\s*30\s*条记录", _text(page)):
+    def _set_page_size(page: Page, total: int) -> None:
+        # The footer can say 30 while the table still contains its previous 10 rows.
+        if (re.search(r"每页显示\s*30\s*条记录", _text(page))
+                and _detail_row_numbers(page) == list(range(1, min(total, 30) + 1))):
             return
         select = page.locator("select:visible").last
         if select.count():
@@ -304,7 +353,8 @@ class ZhongdengAdapter(SiteAdapter):
         expected = min(total, number * 30)
         first = (number - 1) * 30 + 1
         context.wait_until(
-            lambda: _page_range_ready(_text(page), first, expected),
+            lambda: (_page_range_ready(_text(page), first, expected)
+                     and _detail_row_numbers(page) == list(range(first, expected + 1))),
             f"等待中登网第 {number} 页登记记录…", timeout_seconds=60,
         )
 
@@ -319,7 +369,16 @@ class ZhongdengAdapter(SiteAdapter):
         try:
             page.emulate_media(media="screen")
             page.evaluate("window.scrollTo(0, 0)")
-            return context.save_pdf(page)
+            # A delayed proof notice can cover the page after the data loaded.
+            print_style = page.add_style_tag(content=(
+                ".el-message,.el-notification{display:none!important}"
+                ".el-table__body-wrapper,.el-table__body-wrapper .el-scrollbar__wrap"
+                "{height:auto!important;max-height:none!important;overflow:visible!important}"
+            ))
+            try:
+                return context.save_pdf(page)
+            finally:
+                print_style.evaluate("element => element.remove()")
         finally:
             context.pdf_path = original
 
