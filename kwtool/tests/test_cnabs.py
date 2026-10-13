@@ -2,45 +2,62 @@ from pathlib import Path
 from threading import Event
 
 from kwtool.adapters.base import RunContext
-from kwtool.adapters.cnabs import CnabsAdapter, PRODUCT_URL, _search_state
+from kwtool.adapters.cnabs import CnabsAdapter, HOME_URL, SEARCH_URL
 
 
-class FakeLocator:
-    def __init__(self, page, selector):
+SUBJECT = "测试公司"
+
+
+class Locator:
+    def __init__(self, page, selector=""):
         self.page = page
         self.selector = selector
-
-    def count(self):
-        return 1 if self.selector.startswith('input[placeholder*="产品名称"]') else 0
-
-    def inner_text(self, **kwargs):
-        return self.page.body
 
     @property
     def first(self):
         return self
 
-    def wait_for(self, **kwargs):
-        pass
+    def count(self):
+        if self.selector == "body":
+            return 1
+        if "tbody tr" in self.selector:
+            return 1 if self.page.institution_count else 0
+        return 0
 
-    def fill(self, value):
-        self.page.query = value
+    def inner_text(self, **kwargs):
+        return self.page.body
 
-    def press(self, key):
-        self.page.pressed = key
+    def click(self):
+        if "tbody tr" in self.selector:
+            self.page.url = "https://www.cn-abs.com/organization.html#/detail/info?organization_id=490"
+            self.page.body = "机构简介 基本信息 " + ("详情内容 " * 30)
 
 
 class FakePage:
-    url = "about:blank"
-    body = "市场总览"
-    result = False
+    def __init__(self, institution_count):
+        self.url = "about:blank"
+        self.body = "上次登录：2026-10-13"
+        self.institution_count = institution_count
+        self.query = ""
+        self.printed = False
 
     def goto(self, url, **kwargs):
         self.url = url
+        if "/main/search" in url:
+            self.query = SUBJECT
+            self.body = f"产品(0) 证券(0) 机构({self.institution_count}) 专家(0)"
         return None
 
+    def evaluate(self, script, *args):
+        if "上次登录" in script:
+            return True
+        return bool(args) and self.query == args[0]
+
     def locator(self, selector):
-        return FakeLocator(self, selector)
+        return Locator(self, selector)
+
+    def get_by_text(self, selector):
+        return Locator(self, "institution-tab")
 
     def wait_for_load_state(self, *args, **kwargs):
         pass
@@ -48,37 +65,11 @@ class FakePage:
     def wait_for_timeout(self, delay):
         pass
 
-    def evaluate(self, script, *args):
-        if args:
-            return {"matched": self.result, "empty": False, "query": True}
-
     def emulate_media(self, **kwargs):
         pass
 
-    def pdf(self, **kwargs):
-        self.pdf_options = kwargs
-        return b"%PDF-1.4\n"
 
-
-def test_cnabs_needs_actual_matching_result() -> None:
-    page = FakePage()
-    page.url = PRODUCT_URL
-    assert _search_state(page, "测试公司") == "loading"
-    page.result = True
-    assert _search_state(page, "测试公司") == "results"
-
-
-def test_cnabs_rejects_login_page() -> None:
-    page = FakePage()
-    page.url = "https://account.cn-abs.com/account.html"
-    page.result = True
-    assert _search_state(page, "测试公司") == "other-page"
-
-
-def test_cnabs_prints_results_with_browser_style_pdf(tmp_path: Path) -> None:
-    adapter = CnabsAdapter()
-    page = FakePage()
-    page.result = True
+def run(adapter, page, tmp_path):
     context = RunContext(
         browser=None,  # type: ignore[arg-type]
         page=page,  # type: ignore[arg-type]
@@ -89,7 +80,41 @@ def test_cnabs_prints_results_with_browser_style_pdf(tmp_path: Path) -> None:
         report_status=lambda _: None,
         artifacts=[],
     )
-    adapter.run_one(context, "测试公司")
-    assert page.pdf_options["scale"] == 0.35
-    assert page.pdf_options["display_header_footer"] is True
-    assert context.artifacts == [tmp_path / "cnabs.pdf"]
+    saved = []
+    context.save_pdf = lambda current: saved.append(current) or context.pdf_path
+    adapter.run_one(context, SUBJECT)
+    return saved
+
+
+def test_cnabs_requires_login_then_opens_institution_zero_results(tmp_path: Path):
+    page = FakePage(institution_count=0)
+    adapter = CnabsAdapter()
+    assert run(adapter, page, tmp_path) == [page]
+    assert page.url == SEARCH_URL.format("%E6%B5%8B%E8%AF%95%E5%85%AC%E5%8F%B8")
+    assert page.query == SUBJECT
+    assert adapter.default_pdf_settings.scale == 0.35
+
+
+def test_cnabs_opens_matching_organization_detail(tmp_path: Path):
+    page = FakePage(institution_count=1)
+    assert run(CnabsAdapter(), page, tmp_path) == [page]
+    assert "/organization.html#/detail/info?organization_id=490" in page.url
+
+
+def test_cnabs_waits_for_login_before_search(tmp_path: Path):
+    page = FakePage(institution_count=0)
+    page.body = "请登录"
+    login_checks = 0
+
+    def evaluate(script, *args):
+        nonlocal login_checks
+        if "上次登录" in script:
+            login_checks += 1
+            return login_checks > 1
+        return True
+
+    page.evaluate = evaluate
+    saved = run(CnabsAdapter(), page, tmp_path)
+    assert saved == [page]
+    assert login_checks > 1
+    assert page.url != HOME_URL
