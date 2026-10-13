@@ -27,21 +27,53 @@ class Locator:
         return 0
 
     def inner_text(self, **kwargs):
+        if self.selector == "name-cell":
+            return SUBJECT
         return self.page.body
 
+    def locator(self, selector):
+        if selector == "td":
+            return Locator(self.page, "name-cell")
+        return Locator(self.page, selector)
+
+    def get_by_text(self, text, **kwargs):
+        return Locator(self.page, "name-link")
+
     def click(self):
-        if "tbody tr" in self.selector:
-            self.page.url = "https://www.cn-abs.com/organization.html#/detail/info?organization_id=490"
-            self.page.body = "机构简介 基本信息 " + ("详情内容 " * 30)
+        if self.selector == "name-link":
+            self.page.open_detail()
+
+
+class FakeBrowser:
+    def __init__(self, page):
+        self.pages = [page]
 
 
 class FakePage:
-    def __init__(self, institution_count):
+    def __init__(self, institution_count, popup_detail=False):
         self.url = "about:blank"
         self.body = "上次登录：2026-10-13"
         self.institution_count = institution_count
+        self.popup_detail = popup_detail
         self.query = ""
         self.printed = False
+        self.closed = False
+        self.browser = FakeBrowser(self)
+        self.detail = None
+
+    def open_detail(self):
+        detail = FakePage(0) if self.popup_detail else self
+        detail.url = "https://www.cn-abs.com/organization.html#/detail/info?organization_id=490"
+        detail.body = "机构简介 基本信息 " + ("详情内容 " * 30)
+        self.detail = detail
+        if detail is not self:
+            self.browser.pages.append(detail)
+
+    def is_closed(self):
+        return self.closed
+
+    def close(self):
+        self.closed = True
 
     def goto(self, url, **kwargs):
         self.url = url
@@ -73,7 +105,7 @@ class FakePage:
 
 def run(adapter, page, tmp_path):
     context = RunContext(
-        browser=None,  # type: ignore[arg-type]
+        browser=page.browser,  # type: ignore[arg-type]
         page=page,  # type: ignore[arg-type]
         pdf_path=tmp_path / "cnabs.pdf",
         pdf_settings=adapter.default_pdf_settings,
@@ -101,6 +133,14 @@ def test_cnabs_opens_matching_organization_detail(tmp_path: Path):
     page = FakePage(institution_count=1)
     assert run(CnabsAdapter(), page, tmp_path) == [page]
     assert "/organization.html#/detail/info?organization_id=490" in page.url
+
+
+def test_cnabs_prints_detail_from_new_tab_and_closes_it(tmp_path: Path):
+    page = FakePage(institution_count=1, popup_detail=True)
+    saved = run(CnabsAdapter(), page, tmp_path)
+    assert saved == [page.detail]
+    assert "/main/search" in page.url
+    assert page.detail.closed
 
 
 def test_cnabs_waits_for_login_before_search(tmp_path: Path):

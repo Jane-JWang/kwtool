@@ -71,6 +71,20 @@ def _wait_and_click_institution_tab(context: RunContext, page) -> int:
     return count
 
 
+def _is_detail_page(page) -> bool:
+    return (not page.is_closed() and _is_cnabs_page(page)
+            and "/organization.html" in page.url and "/detail/info" in page.url)
+
+
+def _find_detail_page(context: RunContext, search_page, prior_pages):
+    if _is_detail_page(search_page):
+        return search_page
+    for candidate in context.browser.pages:
+        if candidate not in prior_pages and _is_detail_page(candidate):
+            return candidate
+    return None
+
+
 class CnabsAdapter(SiteAdapter):
     key = "cnabs"
     display_name = "资产证券化分析网"
@@ -133,17 +147,37 @@ class CnabsAdapter(SiteAdapter):
                 timeout_seconds=60,
             )
             row = page.locator("table tbody tr, .el-table__body tr").first
-            row.click()
-            context.wait_until(
-                lambda: ("/organization.html" in page.url and "/detail/info" in page.url),
-                "等待资产证券化分析网机构详情页…",
-                timeout_seconds=60,
-            )
-            context.wait_until(
-                lambda: _organization_detail_ready(page),
-                "等待机构详情内容加载…",
-                timeout_seconds=60,
-            )
+            name_cell = row.locator("td").first
+            name = name_cell.inner_text().strip()
+            if not name:
+                raise RuntimeError("资产证券化分析网机构列表缺少机构名称，未保存 PDF")
+            prior_pages = set(context.browser.pages)
+            name_cell.get_by_text(name, exact=True).first.click()
+
+            detail = None
+
+            def detail_opened() -> bool:
+                nonlocal detail
+                detail = _find_detail_page(context, page, prior_pages)
+                return detail is not None
+
+            try:
+                context.wait_until(
+                    detail_opened,
+                    "等待资产证券化分析网机构详情页…",
+                    timeout_seconds=60,
+                )
+                assert detail is not None
+                context.wait_until(
+                    lambda: _organization_detail_ready(detail),
+                    "等待机构详情内容加载…",
+                    timeout_seconds=60,
+                )
+                self._save_result(context, detail)
+            finally:
+                if detail is not None and detail is not page and not detail.is_closed():
+                    detail.close()
+            return
         else:
             # Keep the zero-count institution category visible in the export.
             context.wait_until(
@@ -152,6 +186,9 @@ class CnabsAdapter(SiteAdapter):
                 timeout_seconds=30,
             )
 
+        self._save_result(context, page)
+
+    def _save_result(self, context: RunContext, page) -> None:
         page.evaluate("document.fonts.ready")
         page.emulate_media(media="screen")
         page.evaluate("window.scrollTo(0, 0)")
