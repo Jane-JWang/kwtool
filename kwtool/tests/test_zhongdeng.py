@@ -1,11 +1,12 @@
 from io import BytesIO
 from pathlib import Path
 from threading import Event
+from types import SimpleNamespace
 from zipfile import ZipFile
 
 from kwtool.adapters import registered_adapters
 from kwtool.adapters.base import RunContext
-from kwtool.adapters.zhongdeng import _safe_extract, _save_overall_document, _total_rows
+from kwtool.adapters.zhongdeng import _find_detail_page, _safe_extract, _save_overall_document, _total_rows
 from kwtool.models import PdfSettings
 
 
@@ -49,3 +50,23 @@ def test_query_proof_is_saved_beside_pdfs(tmp_path: Path):
     assert saved == tmp_path / "机构_中登网_查询证明.pdf"
     assert saved.read_bytes() == b"proof"
     assert context.artifacts == [saved]
+
+
+def test_detail_popup_is_selected_over_previous_result_tab():
+    class Page:
+        def __init__(self, path, body):
+            self.url = "https://www.zhongdengwang.org.cn/out/#" + path
+            self.body = body
+
+        def is_closed(self):
+            return False
+
+        def locator(self, selector):
+            assert selector == "body"
+            return SimpleNamespace(inner_text=lambda timeout: self.body)
+
+    search = Page("/query/guarantor/summary", "查询结果统计")
+    previous = Page("/query/guarantor/register/Result", "登记信息列表")
+    popup = Page("/query/guarantor/register/Result", "登记信息列表")
+    context = SimpleNamespace(browser=SimpleNamespace(pages=[search, previous, popup]))
+    assert _find_detail_page(context, search, {search, previous}) is popup

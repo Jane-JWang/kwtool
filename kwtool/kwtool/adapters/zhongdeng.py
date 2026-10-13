@@ -43,6 +43,16 @@ def _total_rows(text: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _find_detail_page(context: RunContext, search_page: Page, existing_pages: set[Page]) -> Page | None:
+    candidates = [search_page, *(page for page in context.browser.pages if page not in existing_pages)]
+    for candidate in candidates:
+        if (not candidate.is_closed() and _site(candidate)
+                and "/query/guarantor/register/Result" in candidate.url
+                and "登记信息列表" in _text(candidate)):
+            return candidate
+    return None
+
+
 def _input_for(page: Page, *labels: str):
     for label in labels:
         field = page.get_by_placeholder(re.compile(label)).first
@@ -163,12 +173,27 @@ class ZhongdengAdapter(SiteAdapter):
             # Zero-result queries have no detail route; the summary itself is
             # the complete official result.
             return
+        existing_pages = set(context.browser.pages)
         detail_link.click()
+        detail = None
+
+        def detail_ready() -> bool:
+            nonlocal detail
+            detail = _find_detail_page(context, page, existing_pages)
+            return detail is not None
+
         context.wait_until(
-            lambda: _site(page) and "/query/guarantor/register/Result" in page.url
-                    and "登记信息列表" in _text(page),
+            detail_ready,
             "等待中登网登记详情页…", timeout_seconds=90,
         )
+        assert detail is not None
+        try:
+            self._save_detail(context, detail, identity)
+        finally:
+            if detail is not page and not detail.is_closed():
+                detail.close()
+
+    def _save_detail(self, context: RunContext, page: Page, identity: str) -> None:
 
         # The detail route contains the paginated list. Wait for its count
         # before choosing 30 rows per page; a newly mounted table may be empty.
