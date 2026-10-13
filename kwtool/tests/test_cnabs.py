@@ -60,6 +60,7 @@ class FakePage:
         self.closed = False
         self.browser = FakeBrowser(self)
         self.detail = None
+        self.resolved_count = institution_count
 
     def open_detail(self):
         detail = FakePage(0) if self.popup_detail else self
@@ -94,7 +95,9 @@ class FakePage:
         return Locator(self, "institution-tab")
 
     def wait_for_load_state(self, *args, **kwargs):
-        pass
+        if args and args[0] == "networkidle" and self.institution_count != self.resolved_count:
+            self.institution_count = self.resolved_count
+            self.body = f"产品(0) 证券(0) 机构({self.institution_count}) 专家(0)"
 
     def wait_for_timeout(self, delay):
         pass
@@ -132,6 +135,14 @@ def test_cnabs_requires_login_then_opens_institution_zero_results(tmp_path: Path
 def test_cnabs_opens_matching_organization_detail(tmp_path: Path):
     page = FakePage(institution_count=1)
     assert run(CnabsAdapter(), page, tmp_path) == [page]
+    assert "/organization.html#/detail/info?organization_id=490" in page.url
+
+
+def test_cnabs_waits_for_count_before_deciding_empty(tmp_path: Path):
+    page = FakePage(institution_count=0)
+    page.resolved_count = 1
+    assert run(CnabsAdapter(), page, tmp_path) == [page]
+    assert page.detail is page
     assert "/organization.html#/detail/info?organization_id=490" in page.url
 
 

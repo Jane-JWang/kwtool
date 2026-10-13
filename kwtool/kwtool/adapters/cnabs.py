@@ -59,9 +59,30 @@ def _institution_count(page) -> int | None:
 
 
 def _wait_and_click_institution_tab(context: RunContext, page) -> int:
+    # CNABS renders all category counts as zero before the search requests
+    # finish. Reading that first render would incorrectly print a zero-result
+    # page even when the institution count becomes positive moments later.
+    page.wait_for_timeout(750)
+    try:
+        page.wait_for_load_state("networkidle", timeout=20000)
+    except PlaywrightError as exc:
+        if not _institution_count(page):
+            context.capture_diagnostic("cnabs-search-still-loading", page)
+            raise RuntimeError("资产证券化分析网检索仍在加载，无法确认机构数量，未保存 PDF") from exc
+
+    last_count = None
+    stable_polls = 0
+
+    def count_settled() -> bool:
+        nonlocal last_count, stable_polls
+        count = _institution_count(page)
+        stable_polls = stable_polls + 1 if count is not None and count == last_count else 1
+        last_count = count
+        return count is not None and stable_polls >= 4
+
     context.wait_until(
-        lambda: _institution_count(page) is not None,
-        "等待资产证券化分析网搜索分类加载…",
+        count_settled,
+        "等待资产证券化分析网机构数量稳定…",
         timeout_seconds=60,
     )
     count = _institution_count(page)
