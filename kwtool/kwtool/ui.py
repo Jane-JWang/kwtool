@@ -158,7 +158,7 @@ class MainWindow(QWidget):
 
         upper_layout.addWidget(QLabel("待查询主体（每行一个）"))
         self.subjects_edit = QPlainTextEdit()
-        self.subjects_edit.setPlaceholderText("每行一个主体，例如：张三(身份证:123456)")
+        self.subjects_edit.setPlaceholderText("每行一个主体，例如：张三[身份证:123456]")
         self.subjects_edit.setFixedHeight(110)
         upper_layout.addWidget(self.subjects_edit)
 
