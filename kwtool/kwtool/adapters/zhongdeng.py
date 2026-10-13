@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 from zipfile import BadZipFile, ZipFile
@@ -33,7 +34,8 @@ def _result_ready(page: Page, subject: str) -> bool:
     if not _site(page) or "/query/guarantor/summary" not in page.url:
         return False
     body = _text(page)
-    return subject in body and "查询结果统计" in body and "登记信息列表" in body
+    return (subject in body and "查询结果统计" in body
+            and "查询到登记" in body and "查询中" not in body)
 
 
 def _total_rows(text: str) -> int | None:
@@ -47,9 +49,9 @@ def _input_for(page: Page, *labels: str):
         if field.count():
             return field
     for label in labels:
-        caption = page.get_by_text(label, exact=True).first
-        if caption.count():
-            field = caption.locator("xpath=following::input[1]")
+        group = page.locator(".el-form-item").filter(has=page.locator(".el-form-item__label").filter(has_text=label)).first
+        if group.count():
+            field = group.locator("input.el-input__inner").first
             if field.count():
                 return field
     raise RuntimeError(f"中登网未找到输入框：{'、'.join(labels)}")
@@ -86,6 +88,7 @@ class ZhongdengAdapter(SiteAdapter):
     def run_one(self, context: RunContext, subject: str) -> None:
         page = context.page
         identity = context.subject_kwargs.get("身份证", "").strip()
+        query_value = identity or subject
         try:
             response = page.goto(HOME, wait_until="domcontentloaded", timeout=60000)
         except PlaywrightError as exc:
@@ -100,38 +103,35 @@ class ZhongdengAdapter(SiteAdapter):
         )
         page.goto(QUERY, wait_until="domcontentloaded", timeout=60000)
         context.wait_until(
-            lambda: _site(page) and "机构名称" in _text(page) and "查询原因" in _text(page),
+            lambda: _site(page) and "担保人类型" in _text(page) and "查询原因" in _text(page),
             "等待中登网按担保人查询表单…", timeout_seconds=90,
         )
 
         choice = "个人" if identity else "机构"
         page.get_by_text(choice, exact=True).first.click()
-        _input_for(page, *("担保人姓名", "姓名") if identity else ("机构名称",)).fill(subject)
         if identity:
-            _input_for(page, "身份证", "证件号码", "证件号").fill(identity)
-
-        reason = page.locator("select:visible").first
-        if reason.count():
-            reason.select_option(label="交易前调查")
+            _input_for(page, "证件号码").fill(identity)
         else:
-            page.get_by_text(re.compile("请选择.*查询原因|交易前调查")).first.click()
-            page.get_by_text("交易前调查", exact=True).last.click()
+            _input_for(page, "机构名称").fill(subject)
+
+        page.locator(".el-form-item").filter(has_text="查询原因").locator(".el-select__wrapper").first.click()
+        page.get_by_role("option", name="交易前调查").click()
 
         self._proof_yes(page)
         captcha = _input_for(page, "校验码", "验证码")
         context.wait_until(
-            lambda: _result_ready(page, subject) or
+            lambda: _result_ready(page, query_value) or
                     (captcha.count() > 0 and bool(captcha.input_value().strip())),
             "请在 Chrome 中填写中登网校验码；填写后程序将提交查询…",
             timeout_seconds=600, user_action=True,
         )
         # The user may submit while entering the code; never send a second query.
-        if not _result_ready(page, subject):
+        if not _result_ready(page, query_value):
             page.get_by_text("查询", exact=True).last.click()
         self._proof_yes(page)
         def result_or_proof() -> bool:
             self._proof_yes(page)
-            return _result_ready(page, subject)
+            return _result_ready(page, query_value)
 
         context.wait_until(
             result_or_proof,
@@ -141,13 +141,25 @@ class ZhongdengAdapter(SiteAdapter):
         page.evaluate("document.fonts.ready")
         self._pdf(context, page, "查询结果")
 
-        # The summary route also contains the detail list. Wait for its count
+        detail_link = page.get_by_role("link", name="详情").first
+        if not detail_link.count():
+            # Zero-result queries have no detail route; the summary itself is
+            # the complete official result.
+            return
+        detail_link.click()
+        context.wait_until(
+            lambda: _site(page) and "/query/guarantor/register/Result" in page.url
+                    and "登记信息列表" in _text(page),
+            "等待中登网登记详情页…", timeout_seconds=90,
+        )
+
+        # The detail route contains the paginated list. Wait for its count
         # before choosing 30 rows per page; a newly mounted table may be empty.
         context.wait_until(lambda: _total_rows(_text(page)) is not None,
                            "等待登记信息列表加载…", timeout_seconds=90)
         total = _total_rows(_text(page))
         assert total is not None
-        self._save_optional_list(context, page, identity)
+        self._save_top_documents(context, page, identity)
         if total == 0:
             self._pdf(context, page, "详情_第1页")
             return
@@ -164,15 +176,11 @@ class ZhongdengAdapter(SiteAdapter):
 
     @staticmethod
     def _proof_yes(page: Page) -> None:
-        # A separate confirmation can appear before or after submitting the
-        # form. When the choice is present, explicitly select Yes.
-        for label in ("是否需要查询证明", "需要查询证明"):
-            field = page.get_by_text(label, exact=False).first
-            if field.count() and field.is_visible():
-                yes = page.get_by_text("是", exact=True).first
-                if yes.count() and yes.is_visible():
-                    yes.click()
-                return
+        group = page.locator(".el-form-item").filter(has_text="是否需要查询证明").first
+        if group.count() and group.is_visible():
+            yes = group.locator(".el-radio").filter(has_text="是").first
+            if yes.count() and "is-checked" not in (yes.get_attribute("class") or ""):
+                yes.click()
 
     @staticmethod
     def _set_page_size(page: Page) -> None:
@@ -186,11 +194,11 @@ class ZhongdengAdapter(SiteAdapter):
             except PlaywrightError:
                 pass
         # Ant Design / Element style dropdown.
-        trigger = page.locator(".el-pagination__sizes, .ant-pagination-options-size-changer, .ivu-page-options-sizer").first
+        trigger = page.locator(".el-select").last
         if not trigger.count():
             raise RuntimeError("中登网未找到每页显示条数控件，无法确认按 30 条分页")
         trigger.click()
-        page.get_by_text("30", exact=True).last.click()
+        page.get_by_role("option", name="30").click()
 
     @staticmethod
     def _wait_page(context: RunContext, page: Page, number: int, total: int) -> None:
@@ -234,16 +242,68 @@ class ZhongdengAdapter(SiteAdapter):
         context.report_status(f"中登网第 {number} 页附件已保存：{archive}")
 
     @staticmethod
-    def _save_optional_list(context: RunContext, page: Page, identity: str) -> None:
-        label = "查询证明" if identity else "登记信息列表"
-        link = page.locator("a").filter(has_text=label).last
-        if not link.count() or not link.is_visible():
+    def _save_top_documents(context: RunContext, page: Page, identity: str) -> None:
+        # The query certificate number is a direct PDF download. It appears
+        # for both institution and individual queries when proof was selected.
+        certificate = page.locator("a.el-link").filter(has_text=re.compile(r"^\d{15,}$")).first
+        if certificate.count():
+            with page.expect_download(timeout=60000) as pending:
+                certificate.click()
+            saved = context.save_download(pending.value)
+            context.report_status(f"中登网查询证明文件已保存：{saved}")
+
+        if identity:
             return
-        try:
-            with page.expect_download(timeout=20000) as pending:
-                link.click()
-            context.save_download(pending.value)
-        except PlaywrightError:
-            # Some deployments expose this as a plain section heading. The
-            # per-page document download below remains the source of records.
-            pass
+        register_list = page.locator("a.el-link").filter(has_text="登记信息列表").first
+        if not register_list.count():
+            return
+        register_list.click()
+        context.wait_until(
+            lambda: "下载申请已提交" in _text(page),
+            "等待中登网登记信息列表下载申请…", timeout_seconds=60,
+        )
+        message = page.locator(".el-message-box").inner_text()
+        match = re.search(r"下载文件编号[：:]\s*(\d+)", message)
+        if not match:
+            raise RuntimeError("中登网登记信息列表下载申请未返回文件编号")
+        file_number = match.group(1)
+        page.get_by_role("button", name="去查看").click()
+        context.wait_until(lambda: "/download/" in page.url,
+                           "等待中登网下载中心…", timeout_seconds=60)
+        field = page.locator(".el-form-item").filter(has_text="下载文件编号").locator("input.el-input__inner").first
+        context.wait_until(lambda: field.count() > 0,
+                           "等待下载中心查询框…", timeout_seconds=60)
+        field.fill(file_number)
+
+        next_refresh = 0.0
+
+        def completed_row():
+            nonlocal next_refresh
+            if time.monotonic() >= next_refresh:
+                page.get_by_role("button", name="查询", exact=True).click()
+                next_refresh = time.monotonic() + 5
+            row = page.locator("table tbody tr").filter(has_text=file_number).first
+            if not row.count():
+                return None
+            status = row.inner_text()
+            if "失败" in status:
+                raise RuntimeError(f"中登网登记信息列表生成失败：{file_number}")
+            return row if "完成" in status else None
+
+        row = None
+
+        def ready() -> bool:
+            nonlocal row
+            row = completed_row()
+            return row is not None
+
+        context.wait_until(ready, "等待登记信息列表 Excel 生成…", timeout_seconds=300)
+        assert row is not None
+        with page.expect_download(timeout=60000) as pending:
+            row.get_by_text("下载", exact=True).click()
+        saved = context.save_download(pending.value)
+        context.report_status(f"中登网登记信息列表已保存：{saved}")
+        page.go_back(wait_until="domcontentloaded", timeout=60000)
+        context.wait_until(lambda: "/query/guarantor/register/Result" in page.url
+                           and "登记信息列表" in _text(page),
+                           "返回中登网登记详情…", timeout_seconds=90)
