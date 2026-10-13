@@ -27,7 +27,7 @@ class NdrcAdapter(SiteAdapter):
         def loaded() -> bool:
             body = context.page.locator("body").inner_text(timeout=5000)
             return subject in parse_qs(urlparse(context.page.url).query).get("qt", []) and any(
-                word in body for word in ("相关结果", "暂无结果", "未找到相关")
+                word in body for word in ("相关结果", "暂无结果", "未找到相关", "未能搜到您想要的内容")
             )
         context.wait_until(loaded, "等待国家发展改革委检索结果", timeout_seconds=60)
         context.page.evaluate("document.fonts.ready")
