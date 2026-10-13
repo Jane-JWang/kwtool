@@ -8,7 +8,7 @@ from kwtool.adapters import registered_adapters
 from kwtool.adapters.base import RunContext
 from kwtool.adapters.zhongdeng import (
     _download_after_click, _find_detail_page, _safe_extract,
-    _page_range_ready, _save_overall_document, _total_rows,
+    _page_range_ready, _save_overall_document, _subject_output_path, _total_rows,
 )
 from kwtool.models import PdfSettings
 
@@ -17,6 +17,13 @@ def test_zhongdeng_registered_and_uses_identity_keyword():
     adapter = registered_adapters()["zhongdeng"]
     assert adapter.optional_kwargs == ("身份证",)
     assert adapter.default_pdf_settings.scale == 0.35
+
+
+def test_subject_artifacts_share_a_folder(tmp_path: Path):
+    base = tmp_path / "261014" / "中登网" / "黑龙江金象生化有限责任公司.pdf"
+    grouped = _subject_output_path(base, "黑龙江金象生化有限责任公司")
+    assert grouped == base.parent / "黑龙江金象生化有限责任公司" / base.name
+    assert _subject_output_path(grouped, "黑龙江金象生化有限责任公司") == grouped
 
 
 def test_result_count_and_safe_attachment_extraction(tmp_path):

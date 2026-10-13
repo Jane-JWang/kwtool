@@ -112,6 +112,14 @@ def _save_overall_document(context: RunContext, download: Download, label: str) 
     return destination
 
 
+def _subject_output_path(pdf_path: Path, subject: str) -> Path:
+    """Keep one query subject's PDFs and downloads together."""
+    folder = safe_filename(subject)
+    if pdf_path.parent.name == folder:
+        return pdf_path
+    return pdf_path.parent / folder / pdf_path.name
+
+
 def _download_after_click(context: RunContext, page: Page, click: Callable[[], None],
                           message: str, timeout_seconds: int = 120,
                           allow_deferred: bool = False) -> Download | None:
@@ -157,6 +165,7 @@ class ZhongdengAdapter(SiteAdapter):
     default_pdf_settings = PdfSettings(landscape=False, scale=0.35, print_background=True)
 
     def run_one(self, context: RunContext, subject: str) -> None:
+        context.pdf_path = _subject_output_path(context.pdf_path, subject)
         page = context.page
         identity = context.subject_kwargs.get("身份证", "").strip()
         query_value = identity or subject
