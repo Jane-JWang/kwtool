@@ -20,30 +20,40 @@ def _is_cnabs_page(page) -> bool:
     return urlparse(page.url).hostname == "www.cn-abs.com"
 
 
+def _read_during_navigation(read, fallback):
+    try:
+        return read()
+    except PlaywrightError as exc:
+        if "Execution context was destroyed" in str(exc):
+            return fallback
+        raise
+
+
 def _is_logged_in(page) -> bool:
     if not _is_cnabs_page(page):
         return False
-    return bool(page.evaluate("""() => {
+    return bool(_read_during_navigation(lambda: page.evaluate("""() => {
       const text = document.body?.innerText || '';
       return /上次登录|退出登录|账号升级/.test(text);
-    }"""))
+    }"""), False))
 
 
 def _search_ready(page, subject: str) -> bool:
     if not _is_cnabs_page(page) or "/main/search" not in page.url:
         return False
-    return bool(page.evaluate("""(subject) => {
+    return bool(_read_during_navigation(lambda: page.evaluate("""(subject) => {
       const inputs = [...document.querySelectorAll('input')];
       const queryVisible = inputs.some(input =>
         (input.offsetWidth || input.offsetHeight || input.getClientRects().length) &&
         input.value.trim() === subject);
       const text = document.body?.innerText || '';
       return queryVisible && /机构\\s*\\(\\s*\\d+\\s*\\)/.test(text);
-    }""", subject))
+    }""", subject), False))
 
 
 def _institution_count(page) -> int | None:
-    labels = page.locator("body").inner_text(timeout=5000)
+    labels = _read_during_navigation(
+        lambda: page.locator("body").inner_text(timeout=5000), "")
     match = re.search(r"机构\s*\(\s*(\d+)\s*\)", labels)
     return int(match.group(1)) if match else None
 
@@ -77,8 +87,21 @@ class CnabsAdapter(SiteAdapter):
         if response is not None and response.status >= 400:
             raise SiteUnavailable(f"资产证券化分析网返回 HTTP {response.status}")
 
+        login_url = None
+        login_samples = 0
+
+        def login_ready() -> bool:
+            nonlocal login_url, login_samples
+            if not _is_logged_in(page):
+                login_url, login_samples = None, 0
+                return False
+            current_url = page.url
+            login_samples = login_samples + 1 if current_url == login_url else 1
+            login_url = current_url
+            return login_samples >= 3
+
         context.wait_until(
-            lambda: _is_logged_in(page),
+            login_ready,
             "资产证券化分析网需要登录：请在右侧 Chrome 完成登录…",
             timeout_seconds=600,
             user_action=True,
@@ -138,5 +161,6 @@ class CnabsAdapter(SiteAdapter):
 
 
 def _organization_detail_ready(page) -> bool:
-    body = page.locator("body").inner_text(timeout=5000)
+    body = _read_during_navigation(
+        lambda: page.locator("body").inner_text(timeout=5000), "")
     return len(body.strip()) > 100 and "机构简介" in body and "基本信息" in body

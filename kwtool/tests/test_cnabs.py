@@ -1,6 +1,8 @@
 from pathlib import Path
 from threading import Event
 
+from playwright.sync_api import Error as PlaywrightError
+
 from kwtool.adapters.base import RunContext
 from kwtool.adapters.cnabs import CnabsAdapter, HOME_URL, SEARCH_URL
 
@@ -110,11 +112,13 @@ def test_cnabs_waits_for_login_before_search(tmp_path: Path):
         nonlocal login_checks
         if "上次登录" in script:
             login_checks += 1
-            return login_checks > 1
+            if login_checks == 1:
+                raise PlaywrightError("Execution context was destroyed, most likely because of a navigation")
+            return login_checks > 2
         return True
 
     page.evaluate = evaluate
     saved = run(CnabsAdapter(), page, tmp_path)
     assert saved == [page]
-    assert login_checks > 1
+    assert login_checks >= 5
     assert page.url != HOME_URL
