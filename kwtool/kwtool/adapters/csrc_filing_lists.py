@@ -91,8 +91,7 @@ def _save_result(path: Path, subject: str, article_url: str, verdict: bool | Non
     outcome = {True: "命中", False: "未命中", None: "无法判定"}[verdict]
     result_path = available_path(path.with_name(f"{path.stem}_核对结果.txt"))
     result_path.write_text(
-        f"查询对象：{subject}\n核对结果：{outcome}\n公告网址：{article_url}\n名单附件：{path.name}\n"
-        "说明：按名称在官方名单附件文本中查找；未命中不代表该机构不存在其他备案或历史记录。\n",
+        f"查询对象：{subject}\n核对结果：{outcome}\n公告网址：{article_url}\n名单附件：{path.name}\n",
         encoding="utf-8",
     )
     return result_path
