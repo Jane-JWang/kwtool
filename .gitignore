@@ -8,3 +8,4 @@ dist/
 *.spec
 .log/
 update_repo.txt
+.vscode/

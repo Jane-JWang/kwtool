@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+
+source ~/.bashrc
+
+echo "Activated!"
+
 function run() {
     local script_dir app_dir python_exe
     script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
