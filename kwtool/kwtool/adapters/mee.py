@@ -1,5 +1,6 @@
 """Adapter for MeeAdapter."""
 from __future__ import annotations
+import re
 from urllib.parse import urlencode
 from playwright.sync_api import Error as PlaywrightError
 from kwtool.adapters.base import RunContext, SiteAdapter, SiteUnavailable
@@ -27,7 +28,7 @@ class MeeAdapter(SiteAdapter):
 
         def loaded() -> bool:
             body = context.page.locator("body").inner_text(timeout=5000)
-            return "搜索结果" in body and "符合条件的有" in body
+            return "搜索结果" in body and re.search(r"符合条件的有\s*[\d,，]+\s*条", body) is not None
 
         try:
             context.wait_until(loaded, "等待生态环境部检索结果", timeout_seconds=60)
