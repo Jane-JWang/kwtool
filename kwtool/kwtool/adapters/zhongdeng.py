@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from zipfile import BadZipFile, ZipFile
 
-from playwright.sync_api import Error as PlaywrightError, Page
+from playwright.sync_api import Download, Error as PlaywrightError, Page
 
 from kwtool.adapters.base import RunContext, SiteAdapter, SiteUnavailable
 from kwtool.models import PdfSettings
@@ -77,6 +77,23 @@ def _safe_extract(archive: Path, destination: Path) -> list[Path]:
                 shutil.copyfileobj(source, output)
             extracted.append(target)
     return extracted
+
+
+def _save_overall_document(context: RunContext, download: Download, label: str) -> Path:
+    """Save a document for the whole query beside its result PDFs."""
+    context.check_stop()
+    suffix = Path(download.suggested_filename).suffix.lower()
+    if not suffix or len(suffix) > 16:
+        raise RuntimeError(f"中登网{label}下载文件缺少有效扩展名")
+    destination = available_path(context.pdf_path.with_name(
+        f"{context.pdf_path.stem}_{label}{suffix}"))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    download.save_as(destination)
+    if download.failure():
+        destination.unlink(missing_ok=True)
+        raise RuntimeError(f"中登网{label}下载失败：{download.failure()}")
+    context.artifacts.append(destination)
+    return destination
 
 
 class ZhongdengAdapter(SiteAdapter):
@@ -231,15 +248,22 @@ class ZhongdengAdapter(SiteAdapter):
             raise RuntimeError(f"第 {number} 页未找到登记证明及附件下载按钮")
         with page.expect_download(timeout=120000) as pending:
             button.click()
-        archive = context.save_download(pending.value)
-        if archive.suffix.lower() == ".zip":
-            folder = archive.parent / f"第{number}页_解压"
-            try:
-                extracted = _safe_extract(archive, folder)
-            except BadZipFile as exc:
-                raise RuntimeError(f"第 {number} 页下载的附件不是有效 ZIP：{archive}") from exc
-            context.artifacts.extend(extracted)
-        context.report_status(f"中登网第 {number} 页附件已保存：{archive}")
+        download = pending.value
+        folder = context.pdf_path.with_name(f"{context.pdf_path.stem}_附件")
+        folder.mkdir(parents=True, exist_ok=True)
+        archive = available_path(folder / f"第{number}页.zip")
+        download.save_as(archive)
+        if download.failure():
+            archive.unlink(missing_ok=True)
+            raise RuntimeError(f"中登网第 {number} 页附件下载失败：{download.failure()}")
+        try:
+            extracted = _safe_extract(archive, folder)
+        except BadZipFile as exc:
+            raise RuntimeError(f"第 {number} 页下载的附件不是有效 ZIP：{archive}") from exc
+        archive.unlink()
+        if folder not in context.artifacts:
+            context.artifacts.append(folder)
+        context.report_status(f"中登网第 {number} 页已解压 {len(extracted)} 个附件到：{folder}")
 
     @staticmethod
     def _save_top_documents(context: RunContext, page: Page, identity: str) -> None:
@@ -249,7 +273,7 @@ class ZhongdengAdapter(SiteAdapter):
         if certificate.count():
             with page.expect_download(timeout=60000) as pending:
                 certificate.click()
-            saved = context.save_download(pending.value)
+            saved = _save_overall_document(context, pending.value, "查询证明")
             context.report_status(f"中登网查询证明文件已保存：{saved}")
 
         if identity:
@@ -301,7 +325,7 @@ class ZhongdengAdapter(SiteAdapter):
         assert row is not None
         with page.expect_download(timeout=60000) as pending:
             row.get_by_text("下载", exact=True).click()
-        saved = context.save_download(pending.value)
+        saved = _save_overall_document(context, pending.value, "登记信息列表")
         context.report_status(f"中登网登记信息列表已保存：{saved}")
         page.go_back(wait_until="domcontentloaded", timeout=60000)
         context.wait_until(lambda: "/query/guarantor/register/Result" in page.url
