@@ -328,10 +328,16 @@ class ZhongdengAdapter(SiteAdapter):
         folder = context.pdf_path.with_name(f"{context.pdf_path.stem}_附件")
         folder.mkdir(parents=True, exist_ok=True)
         archive = available_path(folder / f"第{number}页.zip")
+        context.report_status(
+            f"中登网第 {number} 页附件已开始下载，正在保存 ZIP；文件较大时需等待下载完成…"
+        )
         download.save_as(archive)
         if download.failure():
             archive.unlink(missing_ok=True)
             raise RuntimeError(f"中登网第 {number} 页附件下载失败：{download.failure()}")
+        context.report_status(
+            f"中登网第 {number} 页附件 ZIP 已下载（{archive.stat().st_size:,} 字节），正在解压…"
+        )
         try:
             extracted = _safe_extract(archive, folder)
         except BadZipFile as exc:
