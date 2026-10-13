@@ -11,7 +11,7 @@ from kwtool.adapters.ccdi import CcdiAdapter
 from kwtool.adapters.mem import MemAdapter
 from kwtool.adapters.ndrc import NdrcAdapter
 from kwtool.adapters.national_search import _NationalSearchAdapter
-from kwtool.adapters.prosecutor_12309 import Prosecutor12309Adapter
+from kwtool.adapters.prosecutor_12309 import Prosecutor12309Adapter, _empty
 from kwtool.adapters.sta import StaAdapter
 
 
@@ -259,3 +259,20 @@ def test_mem_restores_search_box_before_print(monkeypatch, tmp_path: Path):
                         lambda self, run, current: printed.append(box.value))
     adapter._handle_results(context, page)
     assert printed == [SUBJECT]
+
+
+def test_12309_empty_page_detected_from_pagination_total():
+    class Total:
+        def count(self):
+            return 1
+
+        def inner_text(self):
+            return "共 0 条"
+
+    class Cards:
+        def all(self):
+            return []
+
+    page = type("Page", (), {"locator": lambda self, selector: Total()
+                if selector == ".pagination-container .el-pagination__total" else Cards()})()
+    assert _empty(page)

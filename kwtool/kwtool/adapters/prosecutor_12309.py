@@ -18,9 +18,9 @@ def _cards(page) -> tuple[str, ...]:
 
 def _empty(page) -> bool:
     total = page.locator(".pagination-container .el-pagination__total")
-    content = page.locator(".text-left")
-    return (total.count() > 0 and re.search(r"共\s*0\s*条", total.inner_text()) is not None
-            and content.count() > 0 and "暂无数据" in content.inner_text())
+    return (total.count() > 0
+            and re.search(r"共\s*0\s*条", total.inner_text()) is not None
+            and not _cards(page))
 
 
 class Prosecutor12309Adapter(_NationalSearchAdapter):
