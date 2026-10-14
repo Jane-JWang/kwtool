@@ -13,7 +13,7 @@ from zipfile import BadZipFile, ZipFile
 from playwright.sync_api import Download, Error as PlaywrightError, Page
 from pypdf import PdfReader, PdfWriter
 
-from kwtool.adapters.base import RunContext, SiteAdapter, SiteUnavailable
+from kwtool.adapters.base import RunCancelled, RunContext, SiteAdapter, SiteUnavailable
 from kwtool.models import FieldSpec, PdfSettings
 from kwtool.output import available_path, safe_filename
 
@@ -24,6 +24,7 @@ QUERY_RECORDS = "https://www.zhongdengwang.org.cn/out/#/work/queryRecords/"
 HOST = "www.zhongdengwang.org.cn"
 DOWNLOAD_LABEL = "下载本页面所有登记证明文件及附件"
 PAGE_SIZES = ("10", "20", "30")
+PAGE_DOWNLOAD_START_TIMEOUT = 30 * 60
 
 
 def _site(page: Page) -> bool:
@@ -315,7 +316,14 @@ class ZhongdengAdapter(SiteAdapter):
             printed = "".join(part_page.extract_text() or "" for part_page in PdfReader(part).pages)
             if not last_id or last_id not in re.sub(r"\s+", "", printed):
                 raise RuntimeError(f"中登网第 {number} 页 PDF 缺少最后一条登记记录，已保留分页面供排查")
-            self._download_page(context, page, number)
+            try:
+                self._download_page(context, page, number)
+            except RunCancelled:
+                raise
+            except Exception as exc:
+                raise SiteUnavailable(
+                    f"中登网第 {number} 页附件未完成，已停止批次以免跳过当前主体的剩余页面：{exc}"
+                ) from exc
             if number < pages:
                 self._next_page(page, number)
         merged = _merge_detail_pdfs(context, detail_parts)
@@ -390,28 +398,40 @@ class ZhongdengAdapter(SiteAdapter):
         button = page.get_by_text(DOWNLOAD_LABEL, exact=True).first
         if not button.count() or not button.is_visible():
             raise RuntimeError(f"第 {number} 页未找到登记证明及附件下载按钮")
-        try:
-            download = _download_after_click(
-                context, page, button.click,
-                f"等待中登网第 {number} 页附件下载…", timeout_seconds=600,
-                progress_interval_seconds=20,
-            )
-        except TimeoutError as exc:
-            raise TimeoutError(
-                f"中登网第 {number} 页附件在 10 分钟内未开始下载；请检查网站提示，已保留该页 PDF"
-            ) from exc
-        if download is None:
-            raise RuntimeError(f"中登网第 {number} 页附件未开始下载")
         folder = context.pdf_path.with_name(f"{context.pdf_path.stem}_附件")
         folder.mkdir(parents=True, exist_ok=True)
-        archive = available_path(folder / f"第{number}页.zip")
-        context.report_status(
-            f"中登网第 {number} 页附件已开始下载，正在保存 ZIP；文件较大时需等待下载完成…"
-        )
-        download.save_as(archive)
-        if download.failure():
-            archive.unlink(missing_ok=True)
-            raise RuntimeError(f"中登网第 {number} 页附件下载失败：{download.failure()}")
+        for attempt in (1, 2, 3):
+            context.check_stop()
+            try:
+                download = _download_after_click(
+                    context, page, button.click,
+                    f"等待中登网第 {number} 页附件开始下载（第 {attempt} 次）…",
+                    timeout_seconds=PAGE_DOWNLOAD_START_TIMEOUT,
+                    progress_interval_seconds=20,
+                )
+            except TimeoutError as exc:
+                raise TimeoutError(
+                    f"中登网第 {number} 页附件在 30 分钟内未开始下载；请检查网站提示，已保留该页 PDF"
+                ) from exc
+            if download is None:
+                raise RuntimeError(f"中登网第 {number} 页附件未开始下载")
+            archive = available_path(folder / f"第{number}页.zip")
+            context.report_status(
+                f"中登网第 {number} 页附件已开始下载，正在保存 ZIP；传输中的文件不受启动超时限制…"
+            )
+            try:
+                download.save_as(archive)
+                failure = download.failure()
+                if failure:
+                    raise PlaywrightError(failure)
+                break
+            except PlaywrightError as exc:
+                archive.unlink(missing_ok=True)
+                context.check_stop()
+                if "canceled" not in str(exc).lower() or attempt == 3:
+                    raise RuntimeError(f"中登网第 {number} 页附件下载失败：{exc}") from exc
+                context.report_status(f"中登网第 {number} 页附件被浏览器取消，正在重试当前页…")
+                page.wait_for_timeout(2000)
         context.report_status(
             f"中登网第 {number} 页附件 ZIP 已下载（{archive.stat().st_size:,} 字节），正在解压…"
         )
