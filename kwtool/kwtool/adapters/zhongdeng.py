@@ -161,7 +161,8 @@ def _subject_output_path(pdf_path: Path, subject: str) -> Path:
 
 def _download_after_click(context: RunContext, page: Page, click: Callable[[], None],
                           message: str, timeout_seconds: int = 120,
-                          allow_deferred: bool = False) -> Download | None:
+                          allow_deferred: bool = False,
+                          progress_interval_seconds: int = 0) -> Download | None:
     """Catch downloads started by either the current tab or a new tab."""
     downloads: list[Download] = []
     watched_pages = list(context.browser.pages)
@@ -178,14 +179,21 @@ def _download_after_click(context: RunContext, page: Page, click: Callable[[], N
     context.browser.on("page", on_page)
     try:
         click()
+        started = time.monotonic()
+        next_progress = started + progress_interval_seconds
 
         def finished() -> bool:
+            nonlocal next_progress
             if downloads:
                 return True
             if allow_deferred:
                 notices = page.locator(".el-message, .el-notification").all_inner_texts()
                 if any("查询证明文件还未生成" in notice for notice in notices):
                     return True
+            if progress_interval_seconds and time.monotonic() >= next_progress:
+                elapsed = int(time.monotonic() - started)
+                context.report_status(f"{message} 已等待 {elapsed} 秒；网站尚未开始下载，可随时点击停止")
+                next_progress = time.monotonic() + progress_interval_seconds
             return False
 
         context.wait_until(finished, message, timeout_seconds=timeout_seconds)
@@ -237,24 +245,14 @@ class ZhongdengAdapter(SiteAdapter):
         page.get_by_role("option", name="交易前调查").click()
 
         self._proof_yes(page)
-        captcha = _input_for(page, "校验码", "验证码")
-        context.wait_until(
-            lambda: _result_ready(page, query_value) or
-                    (captcha.count() > 0 and bool(captcha.input_value().strip())),
-            "请在 Chrome 中填写中登网校验码；填写后程序将提交查询…",
-            timeout_seconds=600, user_action=True,
-        )
-        # The user may submit while entering the code; never send a second query.
-        if not _result_ready(page, query_value):
-            page.get_by_text("查询", exact=True).last.click()
-        self._proof_yes(page)
+        _input_for(page, "校验码", "验证码")
         def result_or_proof() -> bool:
             self._proof_yes(page)
             return _result_ready(page, query_value)
 
         context.wait_until(
             result_or_proof,
-            "等待中登网查询结果；如校验码错误，请在 Chrome 中重新填写并查询…",
+            "请在 Chrome 中填写校验码并亲自点击“查询”；如校验码错误，请重新填写并提交…",
             timeout_seconds=600, user_action=True,
         )
         page.evaluate("document.fonts.ready")
@@ -387,10 +385,16 @@ class ZhongdengAdapter(SiteAdapter):
         button = page.get_by_text(DOWNLOAD_LABEL, exact=True).first
         if not button.count() or not button.is_visible():
             raise RuntimeError(f"第 {number} 页未找到登记证明及附件下载按钮")
-        download = _download_after_click(
-            context, page, button.click,
-            f"等待中登网第 {number} 页附件下载…", timeout_seconds=180,
-        )
+        try:
+            download = _download_after_click(
+                context, page, button.click,
+                f"等待中登网第 {number} 页附件下载…", timeout_seconds=600,
+                progress_interval_seconds=20,
+            )
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"中登网第 {number} 页附件在 10 分钟内未开始下载；请检查网站提示，已保留该页 PDF"
+            ) from exc
         if download is None:
             raise RuntimeError(f"中登网第 {number} 页附件未开始下载")
         folder = context.pdf_path.with_name(f"{context.pdf_path.stem}_附件")
