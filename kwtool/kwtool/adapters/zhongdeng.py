@@ -14,7 +14,7 @@ from playwright.sync_api import Download, Error as PlaywrightError, Page
 from pypdf import PdfReader, PdfWriter
 
 from kwtool.adapters.base import RunContext, SiteAdapter, SiteUnavailable
-from kwtool.models import PdfSettings
+from kwtool.models import FieldSpec, PdfSettings
 from kwtool.output import available_path, safe_filename
 
 
@@ -23,6 +23,7 @@ QUERY = "https://www.zhongdengwang.org.cn/out/#/query/guarantor/"
 QUERY_RECORDS = "https://www.zhongdengwang.org.cn/out/#/work/queryRecords/"
 HOST = "www.zhongdengwang.org.cn"
 DOWNLOAD_LABEL = "下载本页面所有登记证明文件及附件"
+PAGE_SIZES = ("10", "20", "30")
 
 
 def _site(page: Page) -> bool:
@@ -209,6 +210,7 @@ class ZhongdengAdapter(SiteAdapter):
     key = "zhongdeng"
     display_name = "中登网"
     optional_kwargs = ("身份证",)
+    settings_schema = (FieldSpec("page_size", "每页记录数", "choice", "30", PAGE_SIZES),)
     default_pdf_settings = PdfSettings(landscape=False, scale=0.35, print_background=True)
 
     def run_one(self, context: RunContext, subject: str) -> None:
@@ -284,9 +286,12 @@ class ZhongdengAdapter(SiteAdapter):
                 detail.close()
 
     def _save_detail(self, context: RunContext, page: Page, identity: str) -> None:
-
         # The detail route contains the paginated list. Wait for its count
-        # before choosing 30 rows per page; a newly mounted table may be empty.
+        # before choosing the requested rows per page; a newly mounted table may be empty.
+        selected_size = str(context.site_settings.get("page_size", "30"))
+        if selected_size not in PAGE_SIZES:
+            raise ValueError("中登网每页记录数只能选择 10、20 或 30")
+        page_size = int(selected_size)
         context.wait_until(lambda: _total_rows(_text(page)) is not None,
                            "等待登记信息列表加载…", timeout_seconds=90)
         total = _total_rows(_text(page))
@@ -298,12 +303,12 @@ class ZhongdengAdapter(SiteAdapter):
                 self._save_deferred_proof(context, page, pending_proof)
             return
 
-        self._set_page_size(page, total)
-        pages = math.ceil(total / 30)
+        self._set_page_size(page, total, page_size)
+        pages = math.ceil(total / page_size)
         detail_parts: list[Path] = []
         for number in range(1, pages + 1):
             context.check_stop()
-            self._wait_page(context, page, number, total)
+            self._wait_page(context, page, number, total, page_size)
             last_id = _last_detail_id(page)
             part = self._pdf(context, page, f"详情_第{number}页")
             detail_parts.append(part)
@@ -327,29 +332,29 @@ class ZhongdengAdapter(SiteAdapter):
                 yes.click()
 
     @staticmethod
-    def _set_page_size(page: Page, total: int) -> None:
-        # The footer can say 30 while the table still contains its previous 10 rows.
-        if (re.search(r"每页显示\s*30\s*条记录", _text(page))
-                and _detail_row_numbers(page) == list(range(1, min(total, 30) + 1))):
+    def _set_page_size(page: Page, total: int, page_size: int) -> None:
+        # The footer can show the new size while the table still contains old rows.
+        if (re.search(rf"每页显示\s*{page_size}\s*条记录", _text(page))
+                and _detail_row_numbers(page) == list(range(1, min(total, page_size) + 1))):
             return
         select = page.locator("select:visible").last
         if select.count():
             try:
-                select.select_option(label="30")
+                select.select_option(label=str(page_size))
                 return
             except PlaywrightError:
                 pass
         # Ant Design / Element style dropdown.
         trigger = page.locator(".el-select").last
         if not trigger.count():
-            raise RuntimeError("中登网未找到每页显示条数控件，无法确认按 30 条分页")
+            raise RuntimeError(f"中登网未找到每页显示条数控件，无法确认按 {page_size} 条分页")
         trigger.click()
-        page.get_by_role("option", name="30").click()
+        page.get_by_role("option", name=str(page_size)).click()
 
     @staticmethod
-    def _wait_page(context: RunContext, page: Page, number: int, total: int) -> None:
-        expected = min(total, number * 30)
-        first = (number - 1) * 30 + 1
+    def _wait_page(context: RunContext, page: Page, number: int, total: int, page_size: int) -> None:
+        expected = min(total, number * page_size)
+        first = (number - 1) * page_size + 1
         context.wait_until(
             lambda: (_page_range_ready(_text(page), first, expected)
                      and _detail_row_numbers(page) == list(range(first, expected + 1))),

@@ -4,6 +4,7 @@ from threading import Event
 from types import SimpleNamespace
 from zipfile import ZipFile
 
+import pytest
 from pypdf import PdfReader, PdfWriter
 
 from kwtool.adapters import registered_adapters
@@ -19,6 +20,9 @@ def test_zhongdeng_registered_and_uses_identity_keyword():
     adapter = registered_adapters()["zhongdeng"]
     assert adapter.optional_kwargs == ("身份证",)
     assert adapter.default_pdf_settings.scale == 0.35
+    assert adapter.settings_schema[0].key == "page_size"
+    assert adapter.settings_schema[0].choices == ("10", "20", "30")
+    assert adapter.settings_schema[0].default == "30"
 
 
 def test_subject_artifacts_share_a_folder(tmp_path: Path):
@@ -112,14 +116,21 @@ def test_pending_proof_notice_ends_download_wait():
     assert _download_after_click(context, page, click, "等待", allow_deferred=True) is None
 
 
-def test_detail_waits_for_actual_rows_after_page_size_changes():
+@pytest.mark.parametrize("page_size,total,number,old_rows,expected_rows", [
+    (10, 26, 1, list(range(1, 6)), list(range(1, 11))),
+    (20, 26, 2, list(range(1, 21)), list(range(21, 27))),
+    (30, 26, 1, list(range(1, 11)), list(range(1, 27))),
+])
+def test_detail_waits_for_actual_rows_after_page_size_changes(
+        page_size, total, number, old_rows, expected_rows):
     class Page:
         def __init__(self):
-            self.rows = list(range(1, 11))
+            self.rows = old_rows
 
         def locator(self, selector):
             assert selector == "body"
-            return SimpleNamespace(inner_text=lambda timeout: "显示第 1 到第 26 条记录，共 26 条记录")
+            return SimpleNamespace(inner_text=lambda timeout: (
+                f"显示第 {expected_rows[0]} 到第 {expected_rows[-1]} 条记录，共 {total} 条记录"))
 
         def evaluate(self, _script):
             return self.rows
@@ -129,10 +140,10 @@ def test_detail_waits_for_actual_rows_after_page_size_changes():
 
     def wait_until(ready, *_args, **_kwargs):
         checks.append(ready())
-        page.rows = list(range(1, 27))
+        page.rows = expected_rows
         checks.append(ready())
 
-    ZhongdengAdapter._wait_page(SimpleNamespace(wait_until=wait_until), page, 1, 26)
+    ZhongdengAdapter._wait_page(SimpleNamespace(wait_until=wait_until), page, number, total, page_size)
     assert checks == [False, True]
 
 
