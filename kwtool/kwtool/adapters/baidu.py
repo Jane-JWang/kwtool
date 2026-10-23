@@ -7,7 +7,7 @@ import logging
 import time
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
-from playwright.sync_api import Error as PlaywrightError, Page
+from playwright.sync_api import Error as PlaywrightError, Page, TimeoutError as PlaywrightTimeoutError
 from pypdf import PdfReader, PdfWriter
 
 from kwtool.adapters.base import RunContext, SiteAdapter, SiteUnavailable
@@ -83,7 +83,17 @@ def _click_result_page(page: Page, query: str, page_number: int, check_stop=lamb
     """Click the visible page number and wait for Baidu to keep that page selected."""
     for attempt in range(3):
         check_stop()
-        page.locator("#page").get_by_role("link", name=str(page_number), exact=True).click()
+        try:
+            page.locator("#page").get_by_role("link", name=str(page_number), exact=True).click()
+        except PlaywrightTimeoutError:
+            # Baidu may complete navigation while its temporary mask keeps
+            # Playwright's click action waiting until it times out.
+            parsed = urlparse(page.url)
+            params = parse_qs(parsed.query)
+            if (parsed.path != "/s" or params.get("wd") != [query]
+                    or params.get("pn") != [str((page_number - 1) * 10)]
+                    or _active_result_page(page) != page_number):
+                raise
         page.wait_for_url(
             lambda url: urlparse(str(url)).path == "/s"
             and parse_qs(urlparse(str(url)).query).get("wd") == [query]

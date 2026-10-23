@@ -184,6 +184,40 @@ def test_baidu_retries_when_results_revert_to_first_page(monkeypatch) -> None:
     assert len(clicks) == 2
 
 
+def test_baidu_accepts_completed_navigation_when_click_times_out(monkeypatch) -> None:
+    import kwtool.adapters.baidu as module
+
+    clock = iter(range(100))
+    monkeypatch.setattr(module.time, "monotonic", lambda: next(clock))
+    clicks = []
+
+    class Link:
+        def get_by_role(self, *_args, **_kwargs):
+            return self
+
+        def click(self):
+            clicks.append(1)
+            raise module.PlaywrightTimeoutError("temporary mask intercepted click")
+
+    class Page:
+        url = search_url("a bar", 5)
+
+        def locator(self, _selector):
+            return Link()
+
+        def wait_for_url(self, predicate, **_kwargs):
+            assert predicate(self.url)
+
+        def evaluate(self, _script):
+            return 5
+
+        def wait_for_timeout(self, _ms):
+            pass
+
+    _click_result_page(Page(), "a bar", 5)  # type: ignore[arg-type]
+    assert clicks == [1]
+
+
 def test_baidu_exports_keywords_and_pages_in_order(tmp_path: Path, monkeypatch) -> None:
     import kwtool.adapters.baidu as module
 
