@@ -3,22 +3,127 @@
 from __future__ import annotations
 
 import io
+import hashlib
+import json
 import logging
+import re
+import shutil
 import time
+from dataclasses import asdict
+from datetime import datetime
+from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
+from uuid import uuid4
 
 from playwright.sync_api import Error as PlaywrightError, Page, TimeoutError as PlaywrightTimeoutError
 from pypdf import PdfReader, PdfWriter
+from pypdf.errors import PdfReadError
 
 from kwtool.adapters.base import RunContext, SiteAdapter, SiteUnavailable
 from kwtool.models import FieldSpec, PdfSettings
-from kwtool.output import save_pdf_bytes
+from kwtool.output import available_path
 
 
 DEFAULT_KEYWORDS = "立案 调查 监管 处罚"
 PAGE_SELECTION_SETTLE_SECONDS = 0.75
 RESULT_SETTLE_SECONDS = 0.75
 LOGGER = logging.getLogger("kwtool")
+CACHE_VERSION = 1
+
+
+def _cache_date() -> str:
+    return datetime.now().astimezone().date().isoformat()
+
+
+def _cache_root(context: RunContext) -> Path:
+    return context.pdf_path.parent / ".baidu-cache"
+
+
+def _cache_path(context: RunContext, query: str, max_pages: int,
+                page_settle: float, result_settle: float) -> Path:
+    key = {
+        "version": CACHE_VERSION,
+        "date": _cache_date(),
+        "query": query,
+        "max_pages": max_pages,
+        "page_settle_seconds": page_settle,
+        "result_settle_seconds": result_settle,
+        "pdf": asdict(context.pdf_settings),
+    }
+    digest = hashlib.sha256(json.dumps(key, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    return _cache_root(context) / key["date"] / f"{digest}.pdf"
+
+
+def _prune_old_cache(context: RunContext, current_date: str) -> None:
+    root = _cache_root(context)
+    if not root.is_dir():
+        return
+    resolved_root = root.resolve()
+    if resolved_root.parent != root.parent.resolve():
+        return
+    for directory in root.iterdir():
+        if (directory.is_dir() and re.fullmatch(r"\d{4}-\d{2}-\d{2}", directory.name)
+                and directory.name < current_date and directory.resolve().parent == resolved_root):
+            shutil.rmtree(directory)
+
+
+def clear_cache_directory(root: Path) -> None:
+    """Discard Baidu checkpoints after the entire batch has succeeded."""
+    if not root.is_dir() or root.name != ".baidu-cache":
+        return
+    resolved_root = root.resolve()
+    if resolved_root.parent != root.parent.resolve():
+        return
+    for directory in root.iterdir():
+        if (directory.is_dir() and re.fullmatch(r"\d{4}-\d{2}-\d{2}", directory.name)
+                and directory.resolve().parent == resolved_root):
+            shutil.rmtree(directory)
+    try:
+        root.rmdir()
+    except OSError:
+        pass
+
+
+def _valid_cached_pdf(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        return bool(PdfReader(path).pages)
+    except (OSError, PdfReadError, ValueError):
+        path.unlink(missing_ok=True)
+        return False
+
+
+def _save_keyword_pdf(pieces: list[bytes], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.stem}-{uuid4().hex}.tmp")
+    try:
+        writer = PdfWriter()
+        for piece in pieces:
+            writer.append(PdfReader(io.BytesIO(piece)))
+        with temporary.open("xb") as stream:
+            writer.write(stream)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _merge_cached_pdfs(paths: list[Path], requested: Path) -> Path:
+    writer = PdfWriter()
+    for path in paths:
+        writer.append(str(path))
+    requested.parent.mkdir(parents=True, exist_ok=True)
+    candidate = available_path(requested)
+    while True:
+        try:
+            with candidate.open("xb") as stream:
+                writer.write(stream)
+            return candidate
+        except FileExistsError:
+            candidate = available_path(candidate)
+        except Exception:
+            candidate.unlink(missing_ok=True)
+            raise
 
 
 def search_url(query: str, page_number: int) -> str:
@@ -235,10 +340,18 @@ class BaiduAdapter(SiteAdapter):
         result_settle = _settle_seconds(context.site_settings, "result_settle_seconds",
                                         "结果稳定时间", RESULT_SETTLE_SECONDS)
 
-        pieces: list[bytes] = []
+        _prune_old_cache(context, _cache_date())
+        cached_pdfs: list[Path] = []
         page = context.page
         for keyword in keywords:
             query = " ".join(part for part in (common_keyword, subject, keyword) if part)
+            cached_pdf = _cache_path(context, query, max_pages, page_settle, result_settle)
+            if _valid_cached_pdf(cached_pdf):
+                context.check_stop()
+                context.report_status(f"复用当天百度搜索缓存：{query}")
+                cached_pdfs.append(cached_pdf)
+                continue
+            pieces: list[bytes] = []
             previous_results: tuple[str, ...] | None = None
             first_page_links: set[int] = set()
             current_links: set[int] = set()
@@ -302,13 +415,12 @@ class BaiduAdapter(SiteAdapter):
                 pieces.append(context.render_pdf(page))
                 if page_number + 1 not in current_links and page_number + 1 not in first_page_links:
                     break
+            context.check_stop()
+            _save_keyword_pdf(pieces, cached_pdf)
+            cached_pdfs.append(cached_pdf)
+            context.report_status(f"已缓存百度搜索关键词：{query}")
 
         context.check_stop()
-        writer = PdfWriter()
-        for piece in pieces:
-            writer.append(PdfReader(io.BytesIO(piece)))
-        output = io.BytesIO()
-        writer.write(output)
-        saved = save_pdf_bytes(output.getvalue(), context.pdf_path)
+        saved = _merge_cached_pdfs(cached_pdfs, context.pdf_path)
         context.artifacts.append(saved)
         context.report_status(f"已保存百度搜索结果：{saved}")

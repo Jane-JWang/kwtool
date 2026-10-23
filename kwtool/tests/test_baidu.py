@@ -6,6 +6,7 @@ from pathlib import Path
 from threading import Event
 from urllib.parse import parse_qs, urlparse
 
+import pytest
 from pypdf import PdfReader, PdfWriter
 
 from kwtool.adapters import registered_adapters
@@ -220,6 +221,7 @@ def test_baidu_accepts_completed_navigation_when_click_times_out(monkeypatch) ->
 
 def test_baidu_exports_keywords_and_pages_in_order(tmp_path: Path, monkeypatch) -> None:
     import kwtool.adapters.baidu as module
+    monkeypatch.setattr(module, "_cache_date", lambda: "2026-10-23")
 
     class Page:
         url = ""
@@ -284,6 +286,16 @@ def test_baidu_exports_keywords_and_pages_in_order(tmp_path: Path, monkeypatch) 
     assert len(PdfReader(context.artifacts[0]).pages) == 6
     assert page_waits == [1.25] * 4
     assert result_waits == [0.5] * 6
+    assert len(list((tmp_path / ".baidu-cache" / "2026-10-23").glob("*.pdf"))) == 2
+
+    BaiduAdapter().run_one(context, "某公司")
+    assert len(page.printed) == 6
+    assert len(PdfReader(context.artifacts[1]).pages) == 6
+
+    monkeypatch.setattr(module, "_cache_date", lambda: "2026-10-24")
+    BaiduAdapter().run_one(context, "某公司")
+    assert len(page.printed) == 12
+    assert not (tmp_path / ".baidu-cache" / "2026-10-23").exists()
 
 
 def test_baidu_common_keyword_applies_to_each_subject_and_keyword(tmp_path: Path, monkeypatch) -> None:
@@ -329,6 +341,51 @@ def test_baidu_common_keyword_applies_to_each_subject_and_keyword(tmp_path: Path
     assert queries == [
         "foo a bar", "foo a baz", "foo b bar", "foo b baz", "foo c bar", "foo c baz",
     ]
+
+
+def test_baidu_resumes_after_interruption_at_keyword_boundary(tmp_path: Path, monkeypatch) -> None:
+    import kwtool.adapters.baidu as module
+
+    class Page:
+        url = ""
+
+        def goto(self, url, **_kwargs):
+            self.url = url
+
+        def evaluate(self, _script, *_args):
+            return None
+
+        def emulate_media(self, **_kwargs):
+            pass
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    stream = BytesIO()
+    writer.write(stream)
+    context = RunContext(None, Page(), tmp_path / "result.pdf", BaiduAdapter.default_pdf_settings,
+                         {"keywords": "bar baz", "max_pages": 1}, Event(), lambda _: None, [])  # type: ignore[arg-type]
+    monkeypatch.setattr(module, "_open_search", lambda page, query: page.goto(search_url(query, 1)))
+    monkeypatch.setattr(module, "_result_state", lambda *_args: "results")
+    monkeypatch.setattr(module, "_wait_for_complete_results", lambda *_args: (("result",), {}))
+    rendered = []
+    interrupted = True
+
+    def render_pdf(_page):
+        query = parse_qs(urlparse(context.page.url).query)["wd"][0]
+        rendered.append(query)
+        if query == "a baz" and interrupted:
+            raise RuntimeError("interrupted")
+        return stream.getvalue()
+
+    monkeypatch.setattr(context, "render_pdf", render_pdf)
+    with pytest.raises(RuntimeError, match="interrupted"):
+        BaiduAdapter().run_one(context, "a")
+    assert len(list((tmp_path / ".baidu-cache").rglob("*.pdf"))) == 1
+
+    interrupted = False
+    BaiduAdapter().run_one(context, "a")
+    assert rendered == ["a bar", "a baz", "a baz"]
+    assert len(PdfReader(context.artifacts[0]).pages) == 2
 
 
 def test_baidu_stops_at_last_page_and_skips_repeated_results(tmp_path: Path, monkeypatch) -> None:
