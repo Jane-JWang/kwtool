@@ -130,6 +130,29 @@ def search_url(query: str, page_number: int) -> str:
     return "https://www.baidu.com/s?" + urlencode({"wd": query, "pn": (page_number - 1) * 10})
 
 
+def _is_verification_page(page: Page) -> bool:
+    return urlparse(page.url).hostname == "wappass.baidu.com"
+
+
+def _is_requested_result(page: Page, query: str, page_number: int) -> bool:
+    parsed = urlparse(page.url)
+    params = parse_qs(parsed.query)
+    return (parsed.hostname in {"www.baidu.com", "baidu.com"} and parsed.path == "/s"
+            and params.get("wd") == [query]
+            and params.get("pn", ["0"]) == [str((page_number - 1) * 10)])
+
+
+def _wait_for_verification(context: RunContext, query: str, page_number: int) -> None:
+    context.capture_diagnostic(f"baidu-{page_number}-verification", context.page)
+    context.wait_until(
+        lambda: not _is_verification_page(context.page),
+        f"百度要求安全验证，请在右侧 Chrome 完成验证；等待“{query}”第 {page_number} 页…",
+        timeout_seconds=600, user_action=True,
+    )
+    if not _is_requested_result(context.page, query, page_number):
+        raise RuntimeError(f"百度验证后未返回预期搜索结果：{query}，第 {page_number} 页")
+
+
 def _result_state(page: Page, query: str, page_number: int) -> str:
     parsed = urlparse(page.url)
     params = parse_qs(parsed.query)
@@ -301,11 +324,14 @@ def _wait_for_ready_state(context: RunContext, query: str, page_number: int) -> 
                 timeout_seconds=180,
             )
         elif state == "challenge":
-            context.wait_until(
-                lambda: _result_state(page, query, page_number) != "challenge",
-                f"百度搜索可能需要验证，请在右侧 Chrome 完成；等待“{query}”第 {page_number} 页…",
-                timeout_seconds=600, user_action=True,
-            )
+            if _is_verification_page(page):
+                _wait_for_verification(context, query, page_number)
+            else:
+                context.wait_until(
+                    lambda: _result_state(page, query, page_number) != "challenge",
+                    f"百度搜索可能需要验证，请在右侧 Chrome 完成；等待“{query}”第 {page_number} 页…",
+                    timeout_seconds=600, user_action=True,
+                )
         else:
             return state
 
@@ -382,7 +408,10 @@ class BaiduAdapter(SiteAdapter):
                             raise
                         response = None
                 except PlaywrightError as exc:
-                    raise SiteUnavailable(f"无法打开百度搜索页：{exc}") from exc
+                    if _is_verification_page(page):
+                        _wait_for_verification(context, query, page_number)
+                    else:
+                        raise SiteUnavailable(f"无法打开百度搜索页：{exc}") from exc
                 if response is not None and response.status >= 500:
                     raise SiteUnavailable(f"百度搜索页返回 HTTP {response.status}")
 

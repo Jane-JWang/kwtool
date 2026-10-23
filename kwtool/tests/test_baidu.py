@@ -4,13 +4,15 @@ from io import BytesIO
 from itertools import chain, repeat
 from pathlib import Path
 from threading import Event
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 from pypdf import PdfReader, PdfWriter
 
 from kwtool.adapters import registered_adapters
-from kwtool.adapters.baidu import BaiduAdapter, _click_result_page, _open_search, _result_snapshot, search_url
+from kwtool.adapters.baidu import (BaiduAdapter, _click_result_page, _open_search,
+                                   _result_snapshot, _wait_for_verification, search_url)
 from kwtool.adapters.base import RunContext
 
 
@@ -217,6 +219,75 @@ def test_baidu_accepts_completed_navigation_when_click_times_out(monkeypatch) ->
 
     _click_result_page(Page(), "a bar", 5)  # type: ignore[arg-type]
     assert clicks == [1]
+
+
+def test_baidu_waits_for_manual_verification_then_resumes_target_page() -> None:
+    query = "a bar"
+    page = SimpleNamespace(url="https://wappass.baidu.com/static/captcha/tuxing_v2.html?secret=omitted")
+    events = []
+
+    def wait_until(ready, message, **kwargs):
+        events.append((message, kwargs))
+        assert not ready()
+        page.url = search_url(query, 3)
+        assert ready()
+
+    context = SimpleNamespace(page=page, capture_diagnostic=lambda *args: events.append(args),
+                              wait_until=wait_until)
+    _wait_for_verification(context, query, 3)  # type: ignore[arg-type]
+    assert events[0][0] == "baidu-3-verification"
+    assert "安全验证" in events[1][0]
+    assert events[1][1] == {"timeout_seconds": 600, "user_action": True}
+
+
+def test_baidu_rejects_wrong_result_after_verification() -> None:
+    page = SimpleNamespace(url="https://wappass.baidu.com/static/captcha/tuxing_v2.html")
+
+    def wait_until(_ready, _message, **_kwargs):
+        page.url = search_url("a bar", 1)
+
+    context = SimpleNamespace(page=page, capture_diagnostic=lambda *_args: None,
+                              wait_until=wait_until)
+    with pytest.raises(RuntimeError, match="未返回预期搜索结果"):
+        _wait_for_verification(context, "a bar", 3)  # type: ignore[arg-type]
+
+
+def test_baidu_continues_batch_after_pagination_opens_verification(tmp_path: Path, monkeypatch) -> None:
+    import kwtool.adapters.baidu as module
+
+    monkeypatch.setattr(module, "_cache_date", lambda: "2026-10-23")
+    query = "某公司 立案"
+    page = SimpleNamespace(url="", evaluate=lambda *_args: None, emulate_media=lambda **_kwargs: None)
+    monkeypatch.setattr(module, "_open_search", lambda page, _query: setattr(page, "url", search_url(query, 1)))
+
+    def click_result_page(page, _query, _number, *_args):
+        page.url = "https://wappass.baidu.com/static/captcha/tuxing_v2.html"
+        raise module.PlaywrightTimeoutError("captcha interrupted click")
+
+    monkeypatch.setattr(module, "_click_result_page", click_result_page)
+    monkeypatch.setattr(module, "_result_state", lambda *_args: "results")
+    monkeypatch.setattr(module, "_wait_for_complete_results", lambda context, _query, _settle: (
+        ("first",), {2: search_url(query, 2)}) if context.page.url == search_url(query, 1)
+        else (("second",), {}))
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    output = BytesIO()
+    writer.write(output)
+    context = RunContext(None, page, tmp_path / "result.pdf", BaiduAdapter.default_pdf_settings,
+                         {"keywords": "立案", "max_pages": 2}, Event(), lambda _: None, [])  # type: ignore[arg-type]
+    printed = []
+    monkeypatch.setattr(context, "render_pdf", lambda current: printed.append(current.url) or output.getvalue())
+    monkeypatch.setattr(context, "capture_diagnostic", lambda *_args: None)
+
+    def wait_until(ready, _message, **kwargs):
+        assert kwargs["user_action"] is True
+        page.url = search_url(query, 2)
+        assert ready()
+
+    monkeypatch.setattr(context, "wait_until", wait_until)
+    BaiduAdapter().run_one(context, "某公司")
+    assert printed == [search_url(query, 1), search_url(query, 2)]
+    assert len(PdfReader(context.artifacts[0]).pages) == 2
 
 
 def test_baidu_exports_keywords_and_pages_in_order(tmp_path: Path, monkeypatch) -> None:
