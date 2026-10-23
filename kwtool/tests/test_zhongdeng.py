@@ -4,9 +4,12 @@ from threading import Event
 from types import SimpleNamespace
 from zipfile import ZipFile
 
+import pytest
+from playwright.sync_api import Error as PlaywrightError
 from pypdf import PdfReader, PdfWriter
 
 from kwtool.adapters import registered_adapters
+from kwtool.adapters import zhongdeng
 from kwtool.adapters.base import RunContext
 from kwtool.adapters.zhongdeng import (
     ZhongdengAdapter, _download_after_click, _find_detail_page, _merge_detail_pdfs, _safe_extract,
@@ -19,6 +22,9 @@ def test_zhongdeng_registered_and_uses_identity_keyword():
     adapter = registered_adapters()["zhongdeng"]
     assert adapter.optional_kwargs == ("身份证",)
     assert adapter.default_pdf_settings.scale == 0.35
+    assert adapter.settings_schema[0].key == "page_size"
+    assert adapter.settings_schema[0].choices == ("10", "20", "30")
+    assert adapter.settings_schema[0].default == "30"
 
 
 def test_subject_artifacts_share_a_folder(tmp_path: Path):
@@ -112,14 +118,21 @@ def test_pending_proof_notice_ends_download_wait():
     assert _download_after_click(context, page, click, "等待", allow_deferred=True) is None
 
 
-def test_detail_waits_for_actual_rows_after_page_size_changes():
+@pytest.mark.parametrize("page_size,total,number,old_rows,expected_rows", [
+    (10, 26, 1, list(range(1, 6)), list(range(1, 11))),
+    (20, 26, 2, list(range(1, 21)), list(range(21, 27))),
+    (30, 26, 1, list(range(1, 11)), list(range(1, 27))),
+])
+def test_detail_waits_for_actual_rows_after_page_size_changes(
+        page_size, total, number, old_rows, expected_rows):
     class Page:
         def __init__(self):
-            self.rows = list(range(1, 11))
+            self.rows = old_rows
 
         def locator(self, selector):
             assert selector == "body"
-            return SimpleNamespace(inner_text=lambda timeout: "显示第 1 到第 26 条记录，共 26 条记录")
+            return SimpleNamespace(inner_text=lambda timeout: (
+                f"显示第 {expected_rows[0]} 到第 {expected_rows[-1]} 条记录，共 {total} 条记录"))
 
         def evaluate(self, _script):
             return self.rows
@@ -129,10 +142,10 @@ def test_detail_waits_for_actual_rows_after_page_size_changes():
 
     def wait_until(ready, *_args, **_kwargs):
         checks.append(ready())
-        page.rows = list(range(1, 27))
+        page.rows = expected_rows
         checks.append(ready())
 
-    ZhongdengAdapter._wait_page(SimpleNamespace(wait_until=wait_until), page, 1, 26)
+    ZhongdengAdapter._wait_page(SimpleNamespace(wait_until=wait_until), page, number, total, page_size)
     assert checks == [False, True]
 
 
@@ -150,6 +163,57 @@ def test_detail_pdfs_are_combined_and_parts_removed(tmp_path: Path):
     assert len(PdfReader(merged).pages) == 2
     assert context.artifacts == [merged]
     assert not any(part.exists() for part in parts)
+
+
+def test_cancelled_page_download_retries_same_page_and_extracts(monkeypatch, tmp_path: Path):
+    class Button:
+        def count(self):
+            return 1
+
+        def is_visible(self):
+            return True
+
+        def click(self):
+            pass
+
+    class Download:
+        def __init__(self, canceled):
+            self.canceled = canceled
+
+        def save_as(self, destination):
+            if self.canceled:
+                raise PlaywrightError("Download.save_as: canceled")
+            with ZipFile(destination, "w") as archive:
+                archive.writestr("500000123456789012/证明.pdf", b"proof")
+
+        def failure(self):
+            return None
+
+    downloads = [Download(True), Download(False)]
+    waits = []
+
+    def download_after_click(_context, _page, click, _message, **kwargs):
+        waits.append(kwargs["timeout_seconds"])
+        click()
+        return downloads.pop(0)
+
+    monkeypatch.setattr(zhongdeng, "_download_after_click", download_after_click)
+    page = SimpleNamespace(
+        get_by_text=lambda *_args, **_kwargs: SimpleNamespace(first=Button()),
+        wait_for_timeout=lambda _ms: None,
+    )
+    context = SimpleNamespace(
+        pdf_path=tmp_path / "主体.pdf", artifacts=[], report_status=lambda _message: None,
+        check_stop=lambda: None,
+    )
+
+    ZhongdengAdapter._download_page(context, page, 2)
+
+    folder = tmp_path / "主体_附件"
+    assert waits == [zhongdeng.PAGE_DOWNLOAD_START_TIMEOUT] * 2
+    assert (folder / "500000123456789012" / "证明.pdf").read_bytes() == b"proof"
+    assert not list(folder.glob("*.zip"))
+    assert context.artifacts == [folder]
 
 
 def assert_ready(predicate):

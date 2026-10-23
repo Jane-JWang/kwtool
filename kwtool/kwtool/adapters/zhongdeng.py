@@ -13,8 +13,8 @@ from zipfile import BadZipFile, ZipFile
 from playwright.sync_api import Download, Error as PlaywrightError, Page
 from pypdf import PdfReader, PdfWriter
 
-from kwtool.adapters.base import RunContext, SiteAdapter, SiteUnavailable
-from kwtool.models import PdfSettings
+from kwtool.adapters.base import RunCancelled, RunContext, SiteAdapter, SiteUnavailable
+from kwtool.models import FieldSpec, PdfSettings
 from kwtool.output import available_path, safe_filename
 
 
@@ -23,6 +23,8 @@ QUERY = "https://www.zhongdengwang.org.cn/out/#/query/guarantor/"
 QUERY_RECORDS = "https://www.zhongdengwang.org.cn/out/#/work/queryRecords/"
 HOST = "www.zhongdengwang.org.cn"
 DOWNLOAD_LABEL = "下载本页面所有登记证明文件及附件"
+PAGE_SIZES = ("10", "20", "30")
+PAGE_DOWNLOAD_START_TIMEOUT = 30 * 60
 
 
 def _site(page: Page) -> bool:
@@ -161,7 +163,8 @@ def _subject_output_path(pdf_path: Path, subject: str) -> Path:
 
 def _download_after_click(context: RunContext, page: Page, click: Callable[[], None],
                           message: str, timeout_seconds: int = 120,
-                          allow_deferred: bool = False) -> Download | None:
+                          allow_deferred: bool = False,
+                          progress_interval_seconds: int = 0) -> Download | None:
     """Catch downloads started by either the current tab or a new tab."""
     downloads: list[Download] = []
     watched_pages = list(context.browser.pages)
@@ -178,14 +181,21 @@ def _download_after_click(context: RunContext, page: Page, click: Callable[[], N
     context.browser.on("page", on_page)
     try:
         click()
+        started = time.monotonic()
+        next_progress = started + progress_interval_seconds
 
         def finished() -> bool:
+            nonlocal next_progress
             if downloads:
                 return True
             if allow_deferred:
                 notices = page.locator(".el-message, .el-notification").all_inner_texts()
                 if any("查询证明文件还未生成" in notice for notice in notices):
                     return True
+            if progress_interval_seconds and time.monotonic() >= next_progress:
+                elapsed = int(time.monotonic() - started)
+                context.report_status(f"{message} 已等待 {elapsed} 秒；网站尚未开始下载，可随时点击停止")
+                next_progress = time.monotonic() + progress_interval_seconds
             return False
 
         context.wait_until(finished, message, timeout_seconds=timeout_seconds)
@@ -201,6 +211,7 @@ class ZhongdengAdapter(SiteAdapter):
     key = "zhongdeng"
     display_name = "中登网"
     optional_kwargs = ("身份证",)
+    settings_schema = (FieldSpec("page_size", "每页记录数", "choice", "30", PAGE_SIZES),)
     default_pdf_settings = PdfSettings(landscape=False, scale=0.35, print_background=True)
 
     def run_one(self, context: RunContext, subject: str) -> None:
@@ -237,24 +248,14 @@ class ZhongdengAdapter(SiteAdapter):
         page.get_by_role("option", name="交易前调查").click()
 
         self._proof_yes(page)
-        captcha = _input_for(page, "校验码", "验证码")
-        context.wait_until(
-            lambda: _result_ready(page, query_value) or
-                    (captcha.count() > 0 and bool(captcha.input_value().strip())),
-            "请在 Chrome 中填写中登网校验码；填写后程序将提交查询…",
-            timeout_seconds=600, user_action=True,
-        )
-        # The user may submit while entering the code; never send a second query.
-        if not _result_ready(page, query_value):
-            page.get_by_text("查询", exact=True).last.click()
-        self._proof_yes(page)
+        _input_for(page, "校验码", "验证码")
         def result_or_proof() -> bool:
             self._proof_yes(page)
             return _result_ready(page, query_value)
 
         context.wait_until(
             result_or_proof,
-            "等待中登网查询结果；如校验码错误，请在 Chrome 中重新填写并查询…",
+            "请在 Chrome 中填写校验码并亲自点击“查询”；如校验码错误，请重新填写并提交…",
             timeout_seconds=600, user_action=True,
         )
         page.evaluate("document.fonts.ready")
@@ -286,9 +287,12 @@ class ZhongdengAdapter(SiteAdapter):
                 detail.close()
 
     def _save_detail(self, context: RunContext, page: Page, identity: str) -> None:
-
         # The detail route contains the paginated list. Wait for its count
-        # before choosing 30 rows per page; a newly mounted table may be empty.
+        # before choosing the requested rows per page; a newly mounted table may be empty.
+        selected_size = str(context.site_settings.get("page_size", "30"))
+        if selected_size not in PAGE_SIZES:
+            raise ValueError("中登网每页记录数只能选择 10、20 或 30")
+        page_size = int(selected_size)
         context.wait_until(lambda: _total_rows(_text(page)) is not None,
                            "等待登记信息列表加载…", timeout_seconds=90)
         total = _total_rows(_text(page))
@@ -300,19 +304,26 @@ class ZhongdengAdapter(SiteAdapter):
                 self._save_deferred_proof(context, page, pending_proof)
             return
 
-        self._set_page_size(page, total)
-        pages = math.ceil(total / 30)
+        self._set_page_size(page, total, page_size)
+        pages = math.ceil(total / page_size)
         detail_parts: list[Path] = []
         for number in range(1, pages + 1):
             context.check_stop()
-            self._wait_page(context, page, number, total)
+            self._wait_page(context, page, number, total, page_size)
             last_id = _last_detail_id(page)
             part = self._pdf(context, page, f"详情_第{number}页")
             detail_parts.append(part)
             printed = "".join(part_page.extract_text() or "" for part_page in PdfReader(part).pages)
             if not last_id or last_id not in re.sub(r"\s+", "", printed):
                 raise RuntimeError(f"中登网第 {number} 页 PDF 缺少最后一条登记记录，已保留分页面供排查")
-            self._download_page(context, page, number)
+            try:
+                self._download_page(context, page, number)
+            except RunCancelled:
+                raise
+            except Exception as exc:
+                raise SiteUnavailable(
+                    f"中登网第 {number} 页附件未完成，已停止批次以免跳过当前主体的剩余页面：{exc}"
+                ) from exc
             if number < pages:
                 self._next_page(page, number)
         merged = _merge_detail_pdfs(context, detail_parts)
@@ -329,29 +340,29 @@ class ZhongdengAdapter(SiteAdapter):
                 yes.click()
 
     @staticmethod
-    def _set_page_size(page: Page, total: int) -> None:
-        # The footer can say 30 while the table still contains its previous 10 rows.
-        if (re.search(r"每页显示\s*30\s*条记录", _text(page))
-                and _detail_row_numbers(page) == list(range(1, min(total, 30) + 1))):
+    def _set_page_size(page: Page, total: int, page_size: int) -> None:
+        # The footer can show the new size while the table still contains old rows.
+        if (re.search(rf"每页显示\s*{page_size}\s*条记录", _text(page))
+                and _detail_row_numbers(page) == list(range(1, min(total, page_size) + 1))):
             return
         select = page.locator("select:visible").last
         if select.count():
             try:
-                select.select_option(label="30")
+                select.select_option(label=str(page_size))
                 return
             except PlaywrightError:
                 pass
         # Ant Design / Element style dropdown.
         trigger = page.locator(".el-select").last
         if not trigger.count():
-            raise RuntimeError("中登网未找到每页显示条数控件，无法确认按 30 条分页")
+            raise RuntimeError(f"中登网未找到每页显示条数控件，无法确认按 {page_size} 条分页")
         trigger.click()
-        page.get_by_role("option", name="30").click()
+        page.get_by_role("option", name=str(page_size)).click()
 
     @staticmethod
-    def _wait_page(context: RunContext, page: Page, number: int, total: int) -> None:
-        expected = min(total, number * 30)
-        first = (number - 1) * 30 + 1
+    def _wait_page(context: RunContext, page: Page, number: int, total: int, page_size: int) -> None:
+        expected = min(total, number * page_size)
+        first = (number - 1) * page_size + 1
         context.wait_until(
             lambda: (_page_range_ready(_text(page), first, expected)
                      and _detail_row_numbers(page) == list(range(first, expected + 1))),
@@ -387,22 +398,40 @@ class ZhongdengAdapter(SiteAdapter):
         button = page.get_by_text(DOWNLOAD_LABEL, exact=True).first
         if not button.count() or not button.is_visible():
             raise RuntimeError(f"第 {number} 页未找到登记证明及附件下载按钮")
-        download = _download_after_click(
-            context, page, button.click,
-            f"等待中登网第 {number} 页附件下载…", timeout_seconds=180,
-        )
-        if download is None:
-            raise RuntimeError(f"中登网第 {number} 页附件未开始下载")
         folder = context.pdf_path.with_name(f"{context.pdf_path.stem}_附件")
         folder.mkdir(parents=True, exist_ok=True)
-        archive = available_path(folder / f"第{number}页.zip")
-        context.report_status(
-            f"中登网第 {number} 页附件已开始下载，正在保存 ZIP；文件较大时需等待下载完成…"
-        )
-        download.save_as(archive)
-        if download.failure():
-            archive.unlink(missing_ok=True)
-            raise RuntimeError(f"中登网第 {number} 页附件下载失败：{download.failure()}")
+        for attempt in (1, 2, 3):
+            context.check_stop()
+            try:
+                download = _download_after_click(
+                    context, page, button.click,
+                    f"等待中登网第 {number} 页附件开始下载（第 {attempt} 次）…",
+                    timeout_seconds=PAGE_DOWNLOAD_START_TIMEOUT,
+                    progress_interval_seconds=20,
+                )
+            except TimeoutError as exc:
+                raise TimeoutError(
+                    f"中登网第 {number} 页附件在 30 分钟内未开始下载；请检查网站提示，已保留该页 PDF"
+                ) from exc
+            if download is None:
+                raise RuntimeError(f"中登网第 {number} 页附件未开始下载")
+            archive = available_path(folder / f"第{number}页.zip")
+            context.report_status(
+                f"中登网第 {number} 页附件已开始下载，正在保存 ZIP；传输中的文件不受启动超时限制…"
+            )
+            try:
+                download.save_as(archive)
+                failure = download.failure()
+                if failure:
+                    raise PlaywrightError(failure)
+                break
+            except PlaywrightError as exc:
+                archive.unlink(missing_ok=True)
+                context.check_stop()
+                if "canceled" not in str(exc).lower() or attempt == 3:
+                    raise RuntimeError(f"中登网第 {number} 页附件下载失败：{exc}") from exc
+                context.report_status(f"中登网第 {number} 页附件被浏览器取消，正在重试当前页…")
+                page.wait_for_timeout(2000)
         context.report_status(
             f"中登网第 {number} 页附件 ZIP 已下载（{archive.stat().st_size:,} 字节），正在解压…"
         )
