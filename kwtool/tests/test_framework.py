@@ -11,6 +11,7 @@ from pypdf import PdfWriter
 
 from kwtool.adapters.base import RunCancelled, RunContext, SiteUnavailable, print_header
 from kwtool.adapters import registered_adapters
+from kwtool.adapters.baidu import BaiduAdapter
 from kwtool.adapters.gsxt import GsxtAdapter
 from kwtool.models import BatchRequest, BrowserLayout, PdfSettings
 from kwtool.mail163 import MAIL_TITLE, SENDER, SentReport, _message_date, _not_before_click, _pdf_not_before_click, _refresh_seconds
@@ -328,6 +329,33 @@ def test_batch_continues_after_mail_failure_and_reports_saved_pdf(tmp_path: Path
     assert "已保存" in rows[0][3]
     assert (tmp_path / "001-失败企业.pdf").exists()
     assert (tmp_path / "002-成功企业.pdf").exists()
+
+
+def test_baidu_cache_is_removed_only_after_successful_batch(tmp_path: Path, monkeypatch) -> None:
+    failed = True
+
+    class Adapter(BaiduAdapter):
+        def run_one(self, context, subject):
+            cache = context.pdf_path.parent / ".baidu-cache" / "2026-10-23"
+            cache.mkdir(parents=True, exist_ok=True)
+            (cache / "checkpoint.pdf").write_bytes(b"cached")
+            if subject == "企业乙" and failed:
+                raise RuntimeError("interrupted")
+            context.pdf_path.write_bytes(b"final")
+            context.artifacts.append(context.pdf_path)
+
+    class Browser:
+        pages = [FakePage()]
+
+    monkeypatch.setattr("kwtool.worker.registered_adapters", lambda: {"baidu": Adapter()})
+    worker = BrowserWorker(tmp_path / "profile", tmp_path, BrowserLayout(0, 0, 800, 600))
+    request = BatchRequest("baidu", ("企业甲", "企业乙"), "[id]-[object].pdf", PdfSettings())
+    worker._run_batch(Browser(), request)  # type: ignore[arg-type]
+    assert (tmp_path / ".baidu-cache").exists()
+
+    failed = False
+    worker._run_batch(Browser(), request)  # type: ignore[arg-type]
+    assert not (tmp_path / ".baidu-cache").exists()
 
 
 def test_site_outage_stops_batch_before_repeating_requests(tmp_path: Path, monkeypatch) -> None:

@@ -15,6 +15,7 @@ from PySide6.QtCore import QThread, Signal
 from playwright.sync_api import Browser, BrowserContext, Error as PlaywrightError, sync_playwright
 
 from kwtool.adapters import registered_adapters
+from kwtool.adapters.baidu import clear_cache_directory
 from kwtool.adapters.base import RunCancelled, RunContext, SiteUnavailable
 from kwtool.diagnostics import browser_pages, browser_snapshot
 from kwtool.models import BatchRequest, BrowserLayout
@@ -168,6 +169,7 @@ class BrowserWorker(QThread):
         stopped = False
         browser_closed = False
         sent_reports: list[SentReport] = []
+        baidu_cache_directories: set[Path] = set()
         self.batch_state.emit("running")
         self.user_action.emit(False)
         for index, subject in enumerate(request.subjects, 1):
@@ -196,6 +198,8 @@ class BrowserWorker(QThread):
                     diagnostics_dir=diagnostic_base / safe_filename(f"{index:03d}-{subject}") if diagnostic_base else None,
                     subject_kwargs=kwargs,
                 )
+                if request.site_key == "baidu":
+                    baidu_cache_directories.add(run.pdf_path.parent / ".baidu-cache")
                 adapter.run_one(run, name)
                 run.check_stop()
                 if request.site_key == "gsxt" and run.report_sent_at is not None:
@@ -241,6 +245,13 @@ class BrowserWorker(QThread):
             except Exception as exc:
                 logging.getLogger("kwtool").exception("163 邮箱报告收集失败")
                 self.mail_result.emit(0, len(sent_reports), str(exc))
+        if request.site_key == "baidu" and not stopped and failures == 0:
+            for directory in baidu_cache_directories:
+                try:
+                    clear_cache_directory(directory)
+                except OSError:
+                    logging.getLogger("kwtool").exception("无法清理百度缓存：%s", directory)
+                    self.progress.emit(f"无法清理百度缓存：{directory}")
         self.batch_state.emit("idle")
         self.user_action.emit(False)
         self.batch_result.emit(successes, failures, stopped)
