@@ -39,6 +39,7 @@ class Page:
 
     def locator(self, selector):
         return SimpleNamespace(inner_text=lambda **kwargs: self.body,
+                               fill=self.fill,
                                count=lambda: 1, input_value=lambda: SUBJECT,
                                select_option=lambda value: self.selected.append(value))
 

@@ -87,6 +87,12 @@ class _RegionalAdapter(SiteAdapter):
     def _query_proven(self, scope, province, subject, proven):
         return proven
 
+    def _results_complete(self, scope, province, subject, body):
+        site = self.sites[province]
+        return bool(RESULT_COUNT.search(body)
+                    or any(marker in body for marker in site.empty_markers)
+                    or result_signature(scope, self.pagers[province]))
+
     def _before_print(self, page, province, subject):
         pass
 
@@ -196,9 +202,7 @@ class _RegionalAdapter(SiteAdapter):
                     proven = (query_matches(candidate.url, site.query_keys, subject, site.encoding)
                               or candidate.url.split("?", 1)[0] in submitted_urls)
                     proven = self._query_proven(scope, province, subject, proven)
-                    if proven and (RESULT_COUNT.search(body)
-                                   or any(marker in body for marker in site.empty_markers)
-                                   or result_signature(scope, pager)):
+                    if proven and self._results_complete(scope, province, subject, body):
                         signature, since = stable_results.get(candidate.url, ("", 0.0))
                         if signature != body:
                             stable_results[candidate.url] = (body, time.monotonic())

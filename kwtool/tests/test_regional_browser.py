@@ -132,3 +132,91 @@ def test_beijing_samr_no_results_exports_one_page_and_finishes(tmp_path: Path):
         assert "未能搜到您想要的内容" in unicodedata.normalize("NFKC", pdf.pages[0].extract_text())
         assert len(context.pages) == 1
         browser.close()
+
+
+def test_guangdong_procuratorate_restores_query_before_each_print(tmp_path: Path):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel="chrome", headless=True)
+        context = browser.new_context()
+
+        def serve(route):
+            parsed = urlparse(route.request.url)
+            if parsed.path == "/":
+                body = '''<form name="searchform" method="get" target="_blank"
+                    action="http://jcysearch.jcrb.com/search/search.shtml">
+                    <input name="searchWord"><input type="submit"></form>'''
+            else:
+                number = int(parse_qs(parsed.query).get("page", ["1"])[0])
+                after = f'<a href="?searchWord={SUBJECT}&page=2">2</a>' if number == 1 else ""
+                body = f'''<input class="js_search_input" value="">共找到 2 条结果
+                    <div class="js_basic_result_left"><div class="item">检察查询第 {number} 页</div></div>
+                    <div class="listPager">{after}</div>'''
+            route.fulfill(content_type="text/html", body='<!doctype html><meta charset="utf-8">' + body)
+
+        context.route("**/*", serve)
+        adapter = registered_adapters()["regional_procuratorate"]
+        run = RunContext(context, context.new_page(), tmp_path / "result.pdf", adapter.default_pdf_settings,
+                         {"max_pages": 3}, Event(), lambda _: None, [], subject_kwargs={"注册地": "广东省"})
+        rendered_queries = []
+        render = run.render_pdf
+
+        def checked_render(page):
+            rendered_queries.append(page.locator(".js_search_input").input_value())
+            return render(page)
+
+        run.render_pdf = checked_render
+        adapter.run_one(run, SUBJECT)
+        assert rendered_queries == [SUBJECT, SUBJECT]
+        pdf = PdfReader(run.artifacts[0])
+        assert len(pdf.pages) == 2
+        for page in pdf.pages:
+            assert SUBJECT in unicodedata.normalize("NFKC", page.extract_text())
+        browser.close()
+
+
+@pytest.mark.parametrize("mode", ["empty", "results", "loading", "wrong-query"])
+def test_shanghai_procuratorate_native_result_template(tmp_path: Path, mode):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel="chrome", headless=True)
+        context = browser.new_context()
+
+        def serve(route):
+            parsed = urlparse(route.request.url)
+            if parsed.path == "/":
+                body = '''<form action="/shjcysearch.jspx" target="_blank">
+                    <input id="searchText1" name="q"><input type="submit"
+                    onclick="/* searchAll */"></form>'''
+            else:
+                number = int(parse_qs(parsed.query).get("page", ["1"])[0])
+                query = "其他主体" if mode == "wrong-query" else SUBJECT
+                body = f'<input value="{query}"><div>搜索结果 当前查询条件：{query}</div>'
+                if mode == "results":
+                    body += f'''<section><div><a href="/article{number}.html">检察文章第 {number} 页</a>
+                        <p><span>栏目名称：以案说法</span> <span>更新日期：2026.10.26</span></p></div></section>
+                        <div>首页 上一页 <a href="?q={SUBJECT}&page=1">1</a>
+                        <a href="?q={SUBJECT}&page=2">2</a> 下一页 尾页 共 2 页 共 9 条记录</div>'''
+                if mode != "loading":
+                    body += '<footer>上海市人民检察院 版权所有</footer>'
+            route.fulfill(content_type="text/html", body='<!doctype html><meta charset="utf-8">' + body)
+
+        context.route("**/*", serve)
+        adapter = registered_adapters()["regional_procuratorate"]
+        run = RunContext(context, context.new_page(), tmp_path / "result.pdf", adapter.default_pdf_settings,
+                         {"max_pages": 3}, Event(), lambda _: None, [], subject_kwargs={"注册地": "上海市"})
+        wait = run.wait_until
+        run.wait_until = lambda ready, message, **kwargs: wait(ready, message, timeout_seconds=3)
+        if mode in ("loading", "wrong-query"):
+            with pytest.raises(RuntimeError, match="未能确认检索结果"):
+                adapter.run_one(run, SUBJECT)
+            assert not run.artifacts
+            assert not run.pdf_path.exists()
+        else:
+            adapter.run_one(run, SUBJECT)
+            pdf = PdfReader(run.artifacts[0])
+            assert len(pdf.pages) == (2 if mode == "results" else 1)
+            for number, page in enumerate(pdf.pages, 1):
+                text = unicodedata.normalize("NFKC", page.extract_text())
+                assert SUBJECT in text
+                if mode == "results":
+                    assert f"检察文章第 {number} 页" in text
+        browser.close()
