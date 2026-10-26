@@ -99,3 +99,36 @@ def test_beijing_ccdi_restores_header_iframe_query_before_each_print(tmp_path: P
         for page in pdf.pages:
             assert SUBJECT in unicodedata.normalize("NFKC", page.extract_text())
         browser.close()
+
+
+def test_beijing_samr_no_results_exports_one_page_and_finishes(tmp_path: Path):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel="chrome", headless=True)
+        context = browser.new_context()
+
+        def serve(route):
+            parsed = urlparse(route.request.url)
+            if parsed.path == "/":
+                body = '''<form id="form1" method="get" action="/so/s" target="_blank">
+                    <input id="qt" name="qt"><input type="submit"></form>'''
+            else:
+                query = parse_qs(parsed.query)["qt"][0]
+                body = f'''<input value="{query}"><div class="no-result">
+                    很抱歉！未能搜到您想要的内容
+                    <p>建议您：</p><p>1）看看输入的文字是否有错误</p>
+                    <p>2）去掉可能不必要的词或条件</p></div>'''
+            route.fulfill(content_type="text/html", body='<!doctype html><meta charset="utf-8">' + body)
+
+        context.route("**/*", serve)
+        adapter = registered_adapters()["regional_samr"]
+        run = RunContext(context, context.new_page(), tmp_path / "result.pdf", adapter.default_pdf_settings,
+                         {"max_pages": 3}, Event(), lambda _: None, [], subject_kwargs={"注册地": "北京市"})
+        wait = run.wait_until
+        run.wait_until = lambda ready, message, **kwargs: wait(ready, message, timeout_seconds=4)
+        adapter.run_one(run, SUBJECT)
+        assert len(run.artifacts) == 1
+        pdf = PdfReader(run.artifacts[0])
+        assert len(pdf.pages) == 1
+        assert "未能搜到您想要的内容" in unicodedata.normalize("NFKC", pdf.pages[0].extract_text())
+        assert len(context.pages) == 1
+        browser.close()

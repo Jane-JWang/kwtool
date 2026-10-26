@@ -34,6 +34,7 @@ class RegionalSite:
     params: tuple[tuple[str, str], ...] = ()
     direct_query: str = ""
     encoding: str = "utf-8"
+    empty_markers: tuple[str, ...] = ()
 
     def start_url(self, subject: str) -> str:
         if not self.direct_query:
@@ -195,7 +196,9 @@ class _RegionalAdapter(SiteAdapter):
                     proven = (query_matches(candidate.url, site.query_keys, subject, site.encoding)
                               or candidate.url.split("?", 1)[0] in submitted_urls)
                     proven = self._query_proven(scope, province, subject, proven)
-                    if proven and (RESULT_COUNT.search(body) or result_signature(scope, pager)):
+                    if proven and (RESULT_COUNT.search(body)
+                                   or any(marker in body for marker in site.empty_markers)
+                                   or result_signature(scope, pager)):
                         signature, since = stable_results.get(candidate.url, ("", 0.0))
                         if signature != body:
                             stable_results[candidate.url] = (body, time.monotonic())

@@ -15,7 +15,7 @@ class RegionalSamrAdapter(_RegionalAdapter):
             ("input[onclick*='zjamrDoSearch']",), r"/api-gateway/jpaas-jsearch-web-server/search", ("q",)),
         "北京市": RegionalSite("北京市市场监督管理局", "https://scjgj.beijing.gov.cn/",
             ("scjgj.beijing.gov.cn", "www.beijing.gov.cn"), ("#qt",), ("#form1 input[type=submit]",),
-            r"/so/s", ("qt",)),
+            r"/so/s", ("qt",), empty_markers=("未能搜到您想要的内容",)),
         "上海市": RegionalSite("上海市市场监督管理局", "https://scjgj.sh.gov.cn/",
             ("scjgj.sh.gov.cn",), ("#searchword",), ("input.search_submit",),
             r"/kbym/", ("query",)),

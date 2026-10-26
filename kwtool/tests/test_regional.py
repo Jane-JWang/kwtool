@@ -147,6 +147,14 @@ def test_missing_or_unsupported_registration_fails_before_browsing(tmp_path, mon
     assert not printed
 
 
+def test_beijing_samr_empty_result_message_is_printed_without_waiting_for_count(tmp_path, monkeypatch):
+    adapter, run, printed = context_for(tmp_path, monkeypatch, "regional_samr", "北京市",
+        body="很抱歉！未能搜到您想要的内容 建议您：看看输入的文字是否有错误")
+    adapter.run_one(run, SUBJECT)
+    assert len(printed) == 1
+    assert len(run.artifacts) == 1
+
+
 @pytest.mark.parametrize("url,body", [
     ("https://unrelated.example/search?keywords=" + SUBJECT, "共找到 1 条结果"),
     ("https://www.bjsupervision.gov.cn/?searchword=" + SUBJECT, "共找到 1 条结果"),
