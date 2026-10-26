@@ -4,25 +4,32 @@ A semi-automatic tool for web verification.
 
 ## Supported Websites
 
-- 国家企业信用信息公示系统（企信网）：[www.gsxt.gov.cn](https://www.gsxt.gov.cn/)
-- 信用中国：[www.creditchina.gov.cn](https://www.creditchina.gov.cn/)
-- 中国证监会：[www.csrc.gov.cn](https://www.csrc.gov.cn/)
-- 证监会失信查询：[neris.csrc.gov.cn](https://neris.csrc.gov.cn/shixinchaxun/)
-- 财政部：[search.mof.gov.cn](https://search.mof.gov.cn/was5/web/search)
-- 上海证券交易所：[www.sse.com.cn](https://www.sse.com.cn/home/search/index.shtml)
-- 市场监管行政处罚文书网：[cfws.samr.gov.cn](https://cfws.samr.gov.cn/list.html)
-- 百度：[www.baidu.com](https://www.baidu.com/)
-- 中国执行信息公开网：[失信被执行人](https://zxgk.court.gov.cn/gkw/html/shixin/index.html)、[被执行人信息](https://zxgk.court.gov.cn/gkw/html/zhixing/index.html)
-- 地方机关查询：注册地省级人民法院、纪委监委、人民检察院、市场监督管理局，支持广东省、浙江省、北京市、上海市。输入示例：`中信证券股份有限公司[注册地:广东省]`，逐主体选择对应官网，可配置“前 K 页”（默认 3），合并为一份 PDF；实测情况见[网站支持总表](网站支持总表.md#地方机关查询)。
-
-以下站点已接入查询适配器；其中生态环境部、应急管理部、市场监管总局、国家发展改革委和证监会两份名录已完成一次 Chrome 查询及 PDF 生成检查，其余仍待现场验证：
-
-- [中国裁判文书网](https://wenshu.court.gov.cn/)
-- [人民法院案例库](https://rmfyalk.court.gov.cn/home.html)（需先登录）
-- [生态环境部](https://www.mee.gov.cn/)、[应急管理部](https://www.mem.gov.cn/)、[国家市场监督管理总局](https://www.samr.gov.cn/)
-- [国家发展改革委](https://www.ndrc.gov.cn/)、[国家税务总局](https://www.chinatax.gov.cn/)
-- [中央纪委国家监委](https://www.ccdi.gov.cn/)、[12309 中国检察网](https://www.12309.gov.cn/)
-- [资产证券化分析网](https://www.cn-abs.com/)（需登录；查询机构并打开匹配详情）
-- 中国证监会：[证券评级机构首次备案名录](https://www.csrc.gov.cn/csrc/c100102/common_list.shtml?channelid=266a63ac0abb4bf49fdfb8598c502bae)、从事证券服务业务会计师事务所备案名录
-
-各站点范围和验证状态见[网站支持总表](网站支持总表.md)。
+| 网站 | 链接 | 关键词 |
+| --- | --- | --- |
+| 国家企业信用信息公示系统（企信网） | [www.gsxt.gov.cn](https://www.gsxt.gov.cn/) |  |
+| 信用中国 | [www.creditchina.gov.cn](https://www.creditchina.gov.cn/) |  |
+| 中国证监会 | [www.csrc.gov.cn](https://www.csrc.gov.cn/) |  |
+| 证监会失信查询 | [neris.csrc.gov.cn/shixinchaxun](https://neris.csrc.gov.cn/shixinchaxun/) |  |
+| 财政部 | [search.mof.gov.cn/was5/web/search](https://search.mof.gov.cn/was5/web/search) |  |
+| 上海证券交易所 | [www.sse.com.cn/home/search/index.shtml](https://www.sse.com.cn/home/search/index.shtml) |  |
+| 市场监管行政处罚文书网 | [cfws.samr.gov.cn/list.html](https://cfws.samr.gov.cn/list.html) |  |
+| 百度 | [www.baidu.com](https://www.baidu.com/) |  |
+| 中国执行信息公开网（失信被执行人） | [zxgk.court.gov.cn/gkw/html/shixin/index.html](https://zxgk.court.gov.cn/gkw/html/shixin/index.html) | 身份证（可选） |
+| 中国执行信息公开网（被执行人信息） | [zxgk.court.gov.cn/gkw/html/zhixing/index.html](https://zxgk.court.gov.cn/gkw/html/zhixing/index.html) | 身份证（可选） |
+| 中国裁判文书网 | [wenshu.court.gov.cn](https://wenshu.court.gov.cn/) | 身份证（可选） |
+| 人民法院案例库 | [rmfyalk.court.gov.cn/home.html](https://rmfyalk.court.gov.cn/home.html) |  |
+| 生态环境部 | [www.mee.gov.cn](https://www.mee.gov.cn/) |  |
+| 应急管理部 | [www.mem.gov.cn](https://www.mem.gov.cn/) |  |
+| 国家市场监督管理总局 | [www.samr.gov.cn](https://www.samr.gov.cn/) |  |
+| 国家发展改革委 | [www.ndrc.gov.cn](https://www.ndrc.gov.cn/) |  |
+| 国家税务总局 | [www.chinatax.gov.cn](https://www.chinatax.gov.cn/) |  |
+| 中央纪委国家监委 | [www.ccdi.gov.cn](https://www.ccdi.gov.cn/) |  |
+| 12309中国检察网 | [www.12309.gov.cn](https://www.12309.gov.cn/) |  |
+| 资产证券化分析网（CNABS） | [www.cn-abs.com](https://www.cn-abs.com/) |  |
+| 证券评级机构首次备案名录 | [www.csrc.gov.cn/csrc/c100102/common_list.shtml](https://www.csrc.gov.cn/csrc/c100102/common_list.shtml?channelid=266a63ac0abb4bf49fdfb8598c502bae) |  |
+| 从事证券服务业务会计师事务所备案名录 | [www.csrc.gov.cn/csrc/c100102/common_list.shtml](https://www.csrc.gov.cn/csrc/c100102/common_list.shtml?channelid=266a63ac0abb4bf49fdfb8598c502bae) |  |
+| 中登网 | [www.zhongdengwang.org.cn/out/#/home](https://www.zhongdengwang.org.cn/out/#/home) | 身份证（可选） |
+| 注册地省级人民法院（广东、浙江、北京、上海） | 广东省：[search.gdcourts.gov.cn/search/local/208001](https://search.gdcourts.gov.cn/search/local/208001)<br>浙江省：[zjsfgkw.gov.cn](https://zjsfgkw.gov.cn/)<br>北京市：[bjgy.bjcourt.gov.cn](https://bjgy.bjcourt.gov.cn/)<br>上海市：[www.hshfy.sh.cn/shfy/web/search_zh.jsp](https://www.hshfy.sh.cn/shfy/web/search_zh.jsp) | 注册地 |
+| 注册地省级纪委监委（广东、浙江、北京、上海） | 广东省：[www.gdjct.gd.gov.cn](https://www.gdjct.gd.gov.cn/)<br>浙江省：[www.zjsjw.gov.cn](https://www.zjsjw.gov.cn/)<br>北京市：[www.bjsupervision.gov.cn](https://www.bjsupervision.gov.cn/)<br>上海市：[www.shjjjc.gov.cn](https://www.shjjjc.gov.cn/) | 注册地 |
+| 注册地省级人民检察院（广东、浙江、北京、上海） | 广东省：[www.gd.jcy.gov.cn](http://www.gd.jcy.gov.cn/)<br>浙江省：[www.zjjcy.gov.cn](https://www.zjjcy.gov.cn/)<br>北京市：[www.bjjc.gov.cn](https://www.bjjc.gov.cn/)<br>上海市：[www.sh.jcy.gov.cn](https://www.sh.jcy.gov.cn/) | 注册地 |
+| 注册地省级市场监督管理局（广东、浙江、北京、上海） | 广东省：[amr.gd.gov.cn](http://amr.gd.gov.cn/)<br>浙江省：[zjamr.zj.gov.cn](https://zjamr.zj.gov.cn/)<br>北京市：[scjgj.beijing.gov.cn](https://scjgj.beijing.gov.cn/)<br>上海市：[scjgj.sh.gov.cn](https://scjgj.sh.gov.cn/) | 注册地 |
