@@ -114,14 +114,14 @@ class _NationalSearchAdapter(SiteAdapter):
             return query_proven and result_loaded
 
         try:
-            context.wait_until(has_results, f"等待{self.display_name}检索结果；如出现验证，请在浏览器中完成", timeout_seconds=180, user_action=True)
-        except TimeoutError:
-            context.capture_diagnostic("search-results-timeout", page)
-            raise RuntimeError(f"{self.display_name}未能确认检索结果，未保存 PDF")
-        finally:
-            if self.site.submitted_field:
-                context.browser.remove_listener("request", on_request)
-        try:
+            try:
+                context.wait_until(has_results, f"等待{self.display_name}检索结果；如出现验证，请在浏览器中完成", timeout_seconds=180, user_action=True)
+            except TimeoutError:
+                context.capture_diagnostic("search-results-timeout", page)
+                raise RuntimeError(f"{self.display_name}未能确认检索结果，未保存 PDF")
+            finally:
+                if self.site.submitted_field:
+                    context.browser.remove_listener("request", on_request)
             self._restore_search_term(page, subject)
             self._handle_results(context, page)
         finally:
