@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 import pytest
 from pypdf import PdfReader, PdfWriter
 
-from kwtool.adapters.base import RunContext, SiteUnavailable
+from kwtool.adapters.base import RunCancelled, RunContext, SiteUnavailable
 from kwtool.adapters.ccdi import CcdiAdapter
 from kwtool.adapters.mem import MemAdapter
 from kwtool.adapters.ndrc import NdrcAdapter
@@ -73,6 +73,7 @@ class Page:
 
     def close(self):
         self.closed = True
+        self.browser.pages.remove(self)
 
     def goto(self, url, **kwargs):
         self.url = url
@@ -144,6 +145,78 @@ def test_result_page_confirms_search_without_query_in_body(
         assert popup.result_input == SUBJECT
     assert popup.closed is adapter.site.close_result_tab
     assert browser.listeners == []
+
+
+@pytest.mark.parametrize("outcome", ["success", "timeout", "blocked", "cancelled", "pdf-error"])
+def test_12309_repeated_searches_clean_up_result_tabs(outcome, tmp_path: Path, monkeypatch):
+    adapter = Prosecutor12309Adapter()
+    browser = Browser(None)
+    home = Page(browser, adapter.site.url, controls=("input[name=text]", "#btn1"))
+    unrelated = Page(browser, "https://example.com/")
+    browser.pages = [home, unrelated]
+    context = RunContext(
+        browser=browser, page=home, pdf_path=tmp_path / "result.pdf",
+        pdf_settings=adapter.default_pdf_settings, site_settings={},
+        stop_event=Event(), report_status=lambda message: None, artifacts=[],
+    )
+    printed = []
+
+    def handle_results(run, page):
+        assert not page.closed
+        if outcome == "pdf-error":
+            raise RuntimeError("PDF failed")
+        printed.append(page)
+
+    monkeypatch.setattr(adapter, "_handle_results", handle_results)
+    if outcome in ("timeout", "cancelled"):
+        def wait_until(ready, *args, **kwargs):
+            assert not ready()
+            if outcome == "cancelled":
+                raise RunCancelled()
+            raise TimeoutError()
+        context.wait_until = wait_until
+
+    for subject in (SUBJECT, "另一家公司", "第三家公司"):
+        body = {"timeout": "加载中", "cancelled": "加载中",
+                "blocked": "您当前的访问行为存在异常"}.get(outcome, "共找到 0 条结果")
+        popup = Page(browser, "https://www.12309.gov.cn/searchui/", body, result_input=subject)
+        browser.popup = popup
+        if outcome == "success":
+            adapter.run_one(context, subject)
+            assert printed[-1] is popup
+        else:
+            error = {"timeout": RuntimeError, "blocked": SiteUnavailable,
+                     "cancelled": RunCancelled, "pdf-error": RuntimeError}[outcome]
+            with pytest.raises(error):
+                adapter.run_one(context, subject)
+        assert popup.closed
+        assert browser.pages == [home, unrelated]
+        assert not home.closed
+        assert not unrelated.closed
+
+
+def test_12309_same_tab_search_keeps_main_page(tmp_path: Path, monkeypatch):
+    adapter = Prosecutor12309Adapter()
+    browser = Browser(None)
+    home = Page(browser, adapter.site.url, controls=("input[name=text]", "#btn1"))
+    browser.pages = [home]
+
+    def submit(query):
+        home.body = "共找到 0 条结果"
+        home.result_input = query
+
+    browser.submit = submit
+    context = RunContext(
+        browser=browser, page=home, pdf_path=tmp_path / "result.pdf",
+        pdf_settings=adapter.default_pdf_settings, site_settings={},
+        stop_event=Event(), report_status=lambda message: None, artifacts=[],
+    )
+    printed = []
+    monkeypatch.setattr(adapter, "_handle_results", lambda run, page: printed.append(page))
+    adapter.run_one(context, SUBJECT)
+    assert printed == [home]
+    assert browser.pages == [home]
+    assert not home.closed
 
 
 def test_ndrc_recognizes_its_empty_result_message(tmp_path: Path):

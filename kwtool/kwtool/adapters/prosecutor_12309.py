@@ -29,7 +29,7 @@ class Prosecutor12309Adapter(_NationalSearchAdapter):
     settings_schema = (FieldSpec("max_pages", "前 K 页", "integer", 1, minimum=1, maximum=1000),)
     site = SearchSite("https://www.12309.gov.cn/", ("12309.gov.cn",),
                       ("input[name=text]",), ("#btn1",), result_markers=("共找到",),
-                      result_inputs=("input",))
+                      result_inputs=("input",), close_result_tab=True)
 
     def run_one(self, context: RunContext, subject: str) -> None:
         try:
