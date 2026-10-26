@@ -162,3 +162,38 @@ def test_unchanged_articles_after_page_click_do_not_create_pdf(tmp_path: Path):
         assert not run.artifacts
         assert not run.pdf_path.exists()
         browser.close()
+
+
+def test_beijing_samr_uses_main_pager_not_similar_information_pager(tmp_path: Path):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel="chrome", headless=True)
+        context = browser.new_context()
+        requests = []
+
+        def serve(route):
+            parsed = urlparse(route.request.url)
+            if parsed.path == "/":
+                body = '<form id="form1" method="get" action="/so/s" target="_blank"><input id="qt" name="qt"><input type="submit"></form>'
+            else:
+                number = int(parse_qs(parsed.query).get("page", ["1"])[0])
+                requests.append(number)
+                # The real site's last-page next link may stay enabled. It
+                # must not be clicked when there is no numbered next page.
+                after = f'<a data-page="2" href="?qt={SUBJECT}&page=2">2</a><a class="next" href="?qt={SUBJECT}&page=2">下一页</a>' if number == 1 else f'<span class="active">2</span><a class="next" href="?qt={SUBJECT}&page=3">下一页</a>'
+                body = f'''相关结果28条
+                    <div class="search-result-header">北京市场监管结果第 {number} 页</div>
+                    <div class="similar-item-page" style="display:none"><div class="M-box11"></div></div>
+                    <div class="m-style M-box">{after}</div>'''
+            route.fulfill(content_type="text/html", body=html_page(body))
+
+        context.route("**/*", serve)
+        adapter = registered_adapters()["regional_samr"]
+        run = RunContext(context, context.new_page(), tmp_path / "result.pdf", adapter.default_pdf_settings,
+                         {"max_pages": 3}, Event(), lambda _: None, [], subject_kwargs={"注册地": "北京市"})
+        adapter.run_one(run, SUBJECT)
+        assert requests == [1, 2]
+        reader = PdfReader(run.artifacts[0])
+        assert len(reader.pages) == 2
+        assert "北京市场监管结果第 1 页" in reader.pages[0].extract_text()
+        assert "北京市场监管结果第 2 页" in reader.pages[1].extract_text()
+        browser.close()

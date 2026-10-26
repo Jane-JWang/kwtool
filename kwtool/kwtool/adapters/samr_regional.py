@@ -23,6 +23,10 @@ class RegionalSamrAdapter(_RegionalAdapter):
     pagers = {
         '广东省': Pager("#list-body .list-item, .list-body .list-item", "#page-list, .page-list"),
         '浙江省': Pager(".search-results-list__item", "[data-module=pagination]"),
-        '北京市': Pager(".search-result-header", ".M-box11"),
+        # .M-box11 belongs to the similar-information panel; .M-box pages
+        # the actual search results at the bottom of the main list.
+        # Its last-page "next" link may remain enabled until clicked. Rely on
+        # the numbered links, which reflect the actual available result pages.
+        '北京市': Pager(".search-result-header", ".M-box", numbered_only=True),
         '上海市': Pager(".maya-result-item", ".pagination"),
     }

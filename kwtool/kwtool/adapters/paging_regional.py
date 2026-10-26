@@ -9,12 +9,16 @@ import re
 class Pager:
     results: str
     controls: str
+    numbered_only: bool = False
 
 
 def result_signature(scope, pager: Pager) -> tuple[str, ...]:
     """Compare article content, excluding page numbers, clocks and query echoes."""
-    return tuple(text for item in scope.locator(pager.results).all()
-                 if item.is_visible() and (text := item.inner_text().strip()))
+    # Read the list in one browser operation. AJAX may replace it between
+    # successive locator.nth() reads, otherwise leaving a stale index waiting.
+    return tuple(scope.locator(pager.results).evaluate_all("""elements => elements
+        .filter(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden')
+        .map(e => (e.innerText || '').trim()).filter(Boolean)"""))
 
 
 def next_control(scope, pager: Pager, number: int):
@@ -32,6 +36,6 @@ def next_control(scope, pager: Pager, number: int):
             title = control.get_attribute("title") or control.get_attribute("aria-label") or ""
             if label == str(number):
                 choices.append((2, control))
-            elif re.fullmatch(r"[\[【]?\s*(?:下\s*一?\s*页|next|»|›|>)\s*[\]】]?", label, re.I) or "下一页" in title:
+            elif not pager.numbered_only and (re.fullmatch(r"[\[【]?\s*(?:下\s*一?\s*页|next|»|›|>)\s*[\]】]?", label, re.I) or "下一页" in title):
                 choices.append((1, control))
     return max(choices, key=lambda item: item[0])[1] if choices else None
