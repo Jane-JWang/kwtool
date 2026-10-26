@@ -7,13 +7,14 @@ import pytest
 
 from kwtool.adapters import registered_adapters
 from kwtool.adapters.base import RunCancelled, RunContext
-from kwtool.adapters.regional import PROVINCES, SITES, query_matches, resolve_province
+from kwtool.adapters.search_regional import PROVINCES, query_matches, resolve_province
 from kwtool.subjects import parse_subject
 
 
 SUBJECT = "中信证券股份有限公司"
+SITES = {key: adapter.sites for key, adapter in registered_adapters().items() if key.startswith("regional_")}
 RESULT_PATHS = {
-    "regional_court": ("/search/local/208001", "/jrobot/search.do", "/article/essearch.shtml", "/shfy/web/search_re.jsp"),
+    "regional_court": ("/search/local/208001", "/jrobot/search.do", "/article/essearch.shtml", "/shfy/web/search_zh.jsp"),
     "regional_ccdi": ("/search/all/204001", "/allsearch/", "/was5/web/search", "/TrueCMS/searchController/getResult.do"),
     "regional_procuratorate": ("/search/search.shtml", "/jcms/jcms_files/jcms1/web1/site/module/sitesearch/index.jsp", "/search.htm", "/shjcysearch.jspx"),
     "regional_samr": ("/search/all/144", "/api-gateway/jpaas-jsearch-web-server/search", "/so/s", "/kbym/"),
@@ -38,7 +39,11 @@ class Page:
 
     def locator(self, selector):
         return SimpleNamespace(inner_text=lambda **kwargs: self.body,
+                               count=lambda: 1, input_value=lambda: SUBJECT,
                                select_option=lambda value: self.selected.append(value))
+
+    def frame(self, name):
+        return self.browser.result
 
     def fill(self, value):
         self.query = value
@@ -53,7 +58,11 @@ class Page:
         self.browser.pages.append(self.browser.result)
 
     def evaluate(self, script):
-        pass
+        if script == "do_search()":
+            self.click()
+
+    def content(self):
+        return ""
 
     def emulate_media(self, **kwargs):
         pass
@@ -77,19 +86,23 @@ def context_for(tmp_path, monkeypatch, key, province, *, body="共找到 0 条�
     browser.result = Page(browser, url or result_url, body)
     home = Page(browser)
     browser.pages = [home]
-    monkeypatch.setattr("kwtool.adapters.regional._first_visible", lambda frame, selectors: frame)
+    monkeypatch.setattr("kwtool.adapters.search_regional._first_visible", lambda frame, selectors: frame)
+    monkeypatch.setattr("kwtool.adapters.court_regional._first_visible", lambda frame, selectors: frame)
+    monkeypatch.setattr("kwtool.adapters.court_regional.next_control", lambda *args: None)
+    monkeypatch.setattr("kwtool.adapters.search_regional.result_signature", lambda scope, pager: ())
+    monkeypatch.setattr("kwtool.adapters.search_regional.next_control", lambda *args: None)
     adapter = registered_adapters()[key]
     run = RunContext(browser, home, tmp_path / "result.pdf", adapter.default_pdf_settings, {},
                      Event(), lambda message: None, [], subject_kwargs={"注册地": province})
     printed = []
-    run.save_pdf = lambda page: printed.append(page) or run.pdf_path
+    run.render_pdf = lambda page: printed.append(page) or b"PDF"
     def wait(ready, message, **kwargs):
         ready()
         if not ready():
             raise TimeoutError(message)
     run.wait_until = wait
     ticks = iter(range(100))
-    monkeypatch.setattr("kwtool.adapters.regional.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("kwtool.adapters.search_regional.time.monotonic", lambda: next(ticks))
     return adapter, run, printed
 
 
@@ -98,9 +111,14 @@ def test_all_sixteen_routes_search_name_and_export_results(tmp_path, monkeypatch
     adapter, run, printed = context_for(tmp_path, monkeypatch, key, province)
     assert adapter.required_kwargs == ("注册地",)
     assert adapter.default_pdf_settings.scale == 0.35
+    assert adapter.settings_schema[0].key == "max_pages"
+    assert adapter.settings_schema[0].default == 3
     adapter.run_one(run, SUBJECT)
     assert len(printed) == 1
-    assert printed[0].body == "共找到 0 条结果"
+    if key == "regional_court" and province == "上海市":
+        assert printed[0] is run.page
+    else:
+        assert printed[0].body == "共找到 0 条结果"
     assert run.browser.listeners == []
     assert run.browser.pages == [run.page]
     if not SITES[key][province].direct_query:
@@ -160,10 +178,12 @@ def test_cancellation_is_preserved(tmp_path, monkeypatch):
     assert not printed
 
 
-def test_shanghai_court_encodes_chinese_as_gbk():
+def test_shanghai_court_uses_full_search_page_and_native_gbk_form():
     site = SITES["regional_court"]["上海市"]
-    url = site.start_url(SUBJECT)
-    assert "%D6%D0%D0%C5" in url
+    assert site.url.endswith("/search_zh.jsp")
+    assert site.encoding == "gbk"
+    assert not site.direct_query
+    url = "https://www.hshfy.sh.cn/shfy/web/search_re.jsp?" + urlencode({"nr": SUBJECT}, encoding="gbk")
     assert query_matches(url, ("nr",), SUBJECT, encoding="gbk")
     assert not query_matches(url, ("nr",), SUBJECT)
 
@@ -187,3 +207,13 @@ def test_waits_for_inflight_results_request_before_printing(tmp_path, monkeypatc
     run.wait_until = wait
     adapter.run_one(run, SUBJECT)
     assert len(printed) == 1
+
+
+@pytest.mark.parametrize("pages", [0, -1, 1001, "abc", 1.5, True, None])
+def test_invalid_page_limits_fail_before_browsing(tmp_path, monkeypatch, pages):
+    adapter, run, printed = context_for(tmp_path, monkeypatch, "regional_ccdi", "北京市")
+    run.site_settings["max_pages"] = pages
+    with pytest.raises(ValueError, match="前 K 页"):
+        adapter.run_one(run, SUBJECT)
+    assert not printed
+    assert run.page.url == ""

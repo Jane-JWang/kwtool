@@ -17,9 +17,10 @@ from kwtool.adapters.ccdi import CcdiAdapter
 from kwtool.adapters.prosecutor_12309 import Prosecutor12309Adapter
 from kwtool.adapters.wenshu import WenshuAdapter
 from kwtool.adapters.rmfyalk import RmfyalkAdapter
-from kwtool.adapters.regional import (
-    RegionalCourtAdapter, RegionalCcdiAdapter, RegionalProcuratorateAdapter, RegionalSamrAdapter,
-)
+from kwtool.adapters.court_regional import RegionalCourtAdapter
+from kwtool.adapters.ccdi_regional import RegionalCcdiAdapter
+from kwtool.adapters.prosecutor_regional import RegionalProcuratorateAdapter
+from kwtool.adapters.samr_regional import RegionalSamrAdapter
 from kwtool.adapters.sse import SseAdapter
 from kwtool.adapters.zxgk import ShixinAdapter, ZhixingAdapter
 from kwtool.adapters.zhongdeng import ZhongdengAdapter

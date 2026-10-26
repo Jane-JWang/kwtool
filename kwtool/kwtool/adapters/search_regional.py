@@ -2,15 +2,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import io
 import re
 import time
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from playwright.sync_api import Error as PlaywrightError
+from pypdf import PdfReader, PdfWriter
 
 from kwtool.adapters.base import RunContext, SiteAdapter, SiteUnavailable
 from kwtool.adapters.national_search import _allowed, _first_visible
-from kwtool.models import PdfSettings
+from kwtool.adapters.paging_regional import Pager, next_control, result_signature
+from kwtool.models import FieldSpec, PdfSettings
+from kwtool.output import save_pdf_bytes
 
 
 PROVINCES = ("广东省", "浙江省", "北京市", "上海市")
@@ -37,65 +41,6 @@ class RegionalSite:
         return self.url + "?" + urlencode((*self.params, (self.direct_query, subject)), encoding=self.encoding)
 
 
-SITES: dict[str, dict[str, RegionalSite]] = {
-    "regional_court": {
-        "广东省": RegionalSite("广东省高级人民法院", "https://search.gdcourts.gov.cn/search/local/208001",
-            ("gdcourts.gov.cn",), ("#input-keywords",), ("#search-button",),
-            r"/search/local/208001", ("keywords",), direct_query="keywords"),
-        "浙江省": RegionalSite("浙江省高级人民法院", "https://zjsfgkw.gov.cn/",
-            ("zjsfgkw.gov.cn",), ("#search-form input[name=q]",), ("#search-form button",),
-            r"/jrobot/search\.do", ("q",)),
-        "北京市": RegionalSite("北京市高级人民法院", "https://bjgy.bjcourt.gov.cn/",
-            ("bjgy.bjcourt.gov.cn",), ("#keyword",), ("#article_content input[type=submit]",),
-            r"/article/essearch\.shtml", ("keyword",)),
-        "上海市": RegionalSite("上海市高级人民法院", "https://www.hshfy.sh.cn/shfy/web/search_re.jsp",
-            ("www.hshfy.sh.cn",), (), (), r"/shfy/web/search_re\.jsp", ("nr",),
-            params=(("fbrqks", ""), ("fbrqjs", ""), ("bt", "")), direct_query="nr", encoding="gbk"),
-    },
-    "regional_ccdi": {
-        "广东省": RegionalSite("广东省纪委监委（南粤清风网）", "https://www.gdjct.gd.gov.cn/",
-            ("www.gdjct.gd.gov.cn", "gddqsearch.southcn.com"), ("#txtKey",),
-            ("#searchForm button[type=submit]",), r"/search/all/204001", ("keywords",)),
-        "浙江省": RegionalSite("浙江省纪委监委", "https://www.zjsjw.gov.cn/",
-            ("www.zjsjw.gov.cn", "i.tmuyun.com"), ("#anyWord",), ("#searchForm button",),
-            r"/allsearch", ("keyword",)),
-        "北京市": RegionalSite("北京市纪委监委", "https://www.bjsupervision.gov.cn/",
-            ("www.bjsupervision.gov.cn",), ("#textfield",), ("form[name=searchform] input[type=submit]",),
-            r"/was5/web/search", ("searchword",)),
-        "上海市": RegionalSite("上海市纪委监委", "https://www.shjjjc.gov.cn/",
-            ("www.shjjjc.gov.cn",), ("#query",), ("#searchForm a.btn-main",),
-            r"/TrueCMS/searchController/getResult\.do", ("query",)),
-    },
-    "regional_procuratorate": {
-        "广东省": RegionalSite("广东省人民检察院", "http://www.gd.jcy.gov.cn/",
-            ("www.gd.jcy.gov.cn", "jcysearch.jcrb.com"), ("input[name=searchWord]",),
-            ("form[name=searchform] input[type=submit]",), r"/search/search\.shtml", ("searchWord",)),
-        "浙江省": RegionalSite("浙江省人民检察院", "https://www.zjjcy.gov.cn/",
-            ("www.zjjcy.gov.cn",), ("#hotwords",), ("form[name=sitesearch] input[type=submit]",),
-            r"/(?:jcms/jcms_files/jcms1/web1/site/)?module/sitesearch/index\.jsp", ("keyvalue",)),
-        "北京市": RegionalSite("北京市人民检察院", "https://www.bjjc.gov.cn/",
-            ("www.bjjc.gov.cn",), ("#keyword",), (".fd-top-search span[onclick]",),
-            r"/search\.htm", ("keyword",)),
-        "上海市": RegionalSite("上海市人民检察院", "https://www.sh.jcy.gov.cn/",
-            ("www.sh.jcy.gov.cn",), ("#searchText1",), ("input[onclick*='searchAll']",),
-            r"/shjcysearch\.jspx", ("q",)),
-    },
-    "regional_samr": {
-        "广东省": RegionalSite("广东省市场监督管理局", "https://search.gd.gov.cn/search/local_msg/144",
-            ("search.gd.gov.cn",), ("input[name=keywords]",), ("button[type=submit]",),
-            r"/search/(?:local_msg|all)/144", ("keywords",), direct_query="keywords"),
-        "浙江省": RegionalSite("浙江省市场监督管理局", "https://zjamr.zj.gov.cn/",
-            ("zjamr.zj.gov.cn", "search.zj.gov.cn"), ("#allkeyword",),
-            ("input[onclick*='zjamrDoSearch']",), r"/api-gateway/jpaas-jsearch-web-server/search", ("q",)),
-        "北京市": RegionalSite("北京市市场监督管理局", "https://scjgj.beijing.gov.cn/",
-            ("scjgj.beijing.gov.cn", "www.beijing.gov.cn"), ("#qt",), ("#form1 input[type=submit]",),
-            r"/so/s", ("qt",)),
-        "上海市": RegionalSite("上海市市场监督管理局", "https://scjgj.sh.gov.cn/",
-            ("scjgj.sh.gov.cn",), ("#searchword",), ("input.search_submit",),
-            r"/kbym/", ("query",)),
-    },
-}
-
 RESULT_COUNT = re.compile(r"(?:共|找到|检索到|搜索到|约)[\s\S]{0,60}?\d[\d,，\s]*\s*(?:条|个|篇)|"
                           r"(?:没有找到|未找到|未检索到|未搜索到|暂无结果|无相关结果|暂无数据|没有相关|"
                           r"暂时没有信息|搜索结果不存在|找不到和您的查询)")
@@ -120,12 +65,47 @@ def query_matches(url: str, keys: tuple[str, ...], subject: str, encoding: str =
 
 
 class _RegionalAdapter(SiteAdapter):
+    sites: dict[str, RegionalSite]
+    pagers: dict[str, Pager]
     required_kwargs = ("注册地",)
+    settings_schema = (FieldSpec("max_pages", "前 K 页", "integer", 3, minimum=1, maximum=1000),)
     default_pdf_settings = PdfSettings(scale=0.35, print_background=True)
 
+    def _prepare_search(self, context, page, frame, province):
+        pass
+
+    def _submit_search(self, context, page, frame, search, button, province):
+        if button is not None:
+            button.click()
+        else:
+            search.press("Enter")
+
+    def _result_scope(self, page, province):
+        return page
+
+    def _query_proven(self, scope, province, subject, proven):
+        return proven
+
+    def _before_print(self, page, province, subject):
+        pass
+
+    def _turn_page(self, context, page, scope, province, number, signature):
+        control = next_control(scope, self.pagers[province], number)
+        if control is None:
+            return False
+        if not signature:
+            raise RuntimeError("无法识别文章列表，未保存不完整 PDF")
+        control.click()
+        return True
+
     def run_one(self, context: RunContext, subject: str) -> None:
+        raw_pages = context.site_settings.get("max_pages", 3)
+        if isinstance(raw_pages, bool) or not re.fullmatch(r"[0-9]+", str(raw_pages)) or not 1 <= int(raw_pages) <= 1000:
+            raise ValueError("前 K 页必须是 1 到 1000 之间的整数")
+        max_pages = int(raw_pages)
         province = resolve_province(context.subject_kwargs.get("注册地", ""))
-        site = SITES[self.key][province]
+        site = self.sites[province]
+        pager = self.pagers[province]
         context.check_stop()
         context.report_status(f"正在检索{site.name}：{subject}（第 1 页）")
         page = context.page
@@ -181,15 +161,10 @@ class _RegionalAdapter(SiteAdapter):
                 context.wait_until(search_ready, f"等待{site.name}搜索框加载；如有验证请手动完成",
                                    timeout_seconds=60, user_action=True)
                 frame, search = controls
-                # The Guangdong disciplinary site defaults to title-only search.
-                if self.key == "regional_ccdi" and province == "广东省":
-                    frame.locator("#sxt").select_option("content")
+                self._prepare_search(context, page, frame, province)
                 search.fill(subject)
                 button = _first_visible(frame, site.buttons)
-                if button is not None:
-                    button.click()
-                else:
-                    search.press("Enter")
+                self._submit_search(context, page, frame, search, button, province)
 
             stable_results: dict[str, tuple[str, float]] = {}
 
@@ -206,7 +181,10 @@ class _RegionalAdapter(SiteAdapter):
                     if not re.fullmatch(site.result_path + r"/?", parsed.path):
                         continue
                     try:
-                        body = candidate.locator("body").inner_text(timeout=2000)
+                        scope = self._result_scope(candidate, province)
+                        if scope is None:
+                            continue
+                        body = scope.locator("body").inner_text(timeout=2000)
                     except PlaywrightError:
                         # Popups may be between navigation and document creation.
                         continue
@@ -216,7 +194,8 @@ class _RegionalAdapter(SiteAdapter):
                         continue
                     proven = (query_matches(candidate.url, site.query_keys, subject, site.encoding)
                               or candidate.url.split("?", 1)[0] in submitted_urls)
-                    if proven and RESULT_COUNT.search(body):
+                    proven = self._query_proven(scope, province, subject, proven)
+                    if proven and (RESULT_COUNT.search(body) or result_signature(scope, pager)):
                         signature, since = stable_results.get(candidate.url, ("", 0.0))
                         if signature != body:
                             stable_results[candidate.url] = (body, time.monotonic())
@@ -230,18 +209,52 @@ class _RegionalAdapter(SiteAdapter):
 
             context.wait_until(results_ready, f"等待{site.name}检索结果；如出现验证，请在浏览器中完成",
                                timeout_seconds=180, user_action=True)
-            if self.key == "regional_court" and province == "北京市":
-                # The POST response loses the visible keyword; preserve the
-                # submitted term in the PDF, as with the national search sites.
-                search = _first_visible(page, ("input[name=keyword]",))
-                if search is not None:
-                    search.fill(subject)
-            page.evaluate("document.fonts.ready")
-            page.emulate_media(media="screen")
-            page.evaluate("window.scrollTo(0, 0)")
-            context.capture_diagnostic("ready-to-print", page)
-            saved = context.save_pdf(page)
-            context.report_status(f"已保存{site.name}检索结果第 1 页：{saved}")
+            pieces: list[bytes] = []
+            seen: set[tuple[str, ...]] = set()
+            for number in range(1, max_pages + 1):
+                context.check_stop()
+                scope = self._result_scope(page, province)
+                signature = result_signature(scope, pager)
+                if number > 1 and (not signature or signature in seen):
+                    raise RuntimeError(f"{site.name}第 {number} 页结果重复或未加载，未保存 PDF")
+                seen.add(signature)
+                self._before_print(page, province, subject)
+                page.evaluate("document.fonts.ready")
+                page.emulate_media(media="screen")
+                page.evaluate("window.scrollTo(0, 0)")
+                context.capture_diagnostic(f"ready-to-print-{number}", page)
+                pieces.append(context.render_pdf(page))
+                context.report_status(f"已打印{site.name}第 {number} 页")
+                if number == max_pages:
+                    break
+                stable_results.clear()
+                if not self._turn_page(context, page, scope, province, number + 1, signature):
+                    break
+
+                def advanced() -> bool:
+                    if not results_ready():
+                        return False
+                    current = self._result_scope(page, province)
+                    updated = result_signature(current, pager)
+                    return bool(updated) and updated != signature
+
+                context.wait_until(advanced, f"等待{site.name}第 {number + 1} 页结果加载完成",
+                                   timeout_seconds=180, user_action=True)
+
+            context.check_stop()
+            if len(pieces) == 1:
+                data = pieces[0]
+            else:
+                writer = PdfWriter()
+                for piece in pieces:
+                    writer.append(PdfReader(io.BytesIO(piece)))
+                output = io.BytesIO()
+                writer.write(output)
+                data = output.getvalue()
+            saved = save_pdf_bytes(data, context.pdf_path)
+            context.pdf_path = saved
+            context.artifacts.append(saved)
+            context.report_status(f"已保存{site.name}前 {len(pieces)} 页检索结果：{saved}")
         except TimeoutError as exc:
             context.capture_diagnostic("regional-search-timeout", page)
             raise RuntimeError(f"{site.name}未能确认检索结果，未保存 PDF") from exc
@@ -257,23 +270,3 @@ class _RegionalAdapter(SiteAdapter):
             for opened in list(context.browser.pages):
                 if opened not in original_pages and _allowed(opened.url, site.hosts) and not opened.is_closed():
                     opened.close()
-
-
-class RegionalCourtAdapter(_RegionalAdapter):
-    key = "regional_court"
-    display_name = "注册地省级人民法院"
-
-
-class RegionalCcdiAdapter(_RegionalAdapter):
-    key = "regional_ccdi"
-    display_name = "注册地省级纪委监委"
-
-
-class RegionalProcuratorateAdapter(_RegionalAdapter):
-    key = "regional_procuratorate"
-    display_name = "注册地省级人民检察院"
-
-
-class RegionalSamrAdapter(_RegionalAdapter):
-    key = "regional_samr"
-    display_name = "注册地省级市场监督管理局"
