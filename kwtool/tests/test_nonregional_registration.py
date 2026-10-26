@@ -6,7 +6,7 @@ def test_new_nonregional_sites_are_selectable_with_print_defaults() -> None:
     keys = {
         "wenshu", "mee", "mem", "samr", "ndrc", "sta", "ccdi",
         "prosecutor_12309", "csrc_rating_filing", "csrc_accounting_filing",
-        "cnabs",
+        "cnabs", "rmfyalk",
     }
     assert keys <= adapters.keys()
     for key in keys:

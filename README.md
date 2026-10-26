@@ -17,6 +17,7 @@ A semi-automatic tool for web verification.
 以下站点已接入查询适配器；其中生态环境部、应急管理部、市场监管总局、国家发展改革委和证监会两份名录已完成一次 Chrome 查询及 PDF 生成检查，其余仍待现场验证：
 
 - [中国裁判文书网](https://wenshu.court.gov.cn/)
+- [人民法院案例库](https://rmfyalk.court.gov.cn/home.html)（需先登录）
 - [生态环境部](https://www.mee.gov.cn/)、[应急管理部](https://www.mem.gov.cn/)、[国家市场监督管理总局](https://www.samr.gov.cn/)
 - [国家发展改革委](https://www.ndrc.gov.cn/)、[国家税务总局](https://www.chinatax.gov.cn/)
 - [中央纪委国家监委](https://www.ccdi.gov.cn/)、[12309 中国检察网](https://www.12309.gov.cn/)
