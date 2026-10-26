@@ -3,7 +3,7 @@ import os
 import unicodedata
 from pathlib import Path
 from threading import Event
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from playwright.sync_api import sync_playwright
@@ -56,4 +56,46 @@ def test_regional_browser_search_and_print(tmp_path: Path, key, province):
         assert "地方官网检索" in text
         assert "1/1" in text
         assert ("search.gdcourts.gov.cn" if key == "regional_court" else "scjgj.sh.gov.cn") in text
+        browser.close()
+
+
+def test_beijing_ccdi_restores_header_iframe_query_before_each_print(tmp_path: Path):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel="chrome", headless=True)
+        context = browser.new_context()
+
+        def serve(route):
+            parsed = urlparse(route.request.url)
+            if parsed.path in ("/", "/index_314.html"):
+                # Both the homepage and the freshly reloaded result header
+                # start with an empty field, as on the official website.
+                body = '''<form name="searchform" method="get" action="/was5/web/search" target="_top">
+                    <input id="textfield" name="searchword" value=""><input type="submit"></form>'''
+            else:
+                params = parse_qs(parsed.query)
+                number = int(params.get("page", ["1"])[0])
+                after = f'<a href="?searchword={SUBJECT}&page=2">2</a>' if number == 1 else ""
+                body = f'''<iframe src="/index_314.html"></iframe>共找到 2 条结果
+                    <ul class="news_list"><li>纪检查询第 {number} 页</li></ul><div class="page">{after}</div>'''
+            route.fulfill(content_type="text/html", body='<!doctype html><meta charset="utf-8">' + body)
+
+        context.route("**/*", serve)
+        adapter = registered_adapters()["regional_ccdi"]
+        run = RunContext(context, context.new_page(), tmp_path / "result.pdf", adapter.default_pdf_settings,
+                         {}, Event(), lambda _: None, [], subject_kwargs={"注册地": "北京市"})
+        rendered_queries = []
+        render = run.render_pdf
+
+        def checked_render(page):
+            search = page.frame_locator("iframe[src*='index_314.html']").locator("input[name=searchword]")
+            rendered_queries.append(search.input_value())
+            return render(page)
+
+        run.render_pdf = checked_render
+        adapter.run_one(run, SUBJECT)
+        assert rendered_queries == [SUBJECT, SUBJECT]
+        pdf = PdfReader(run.artifacts[0])
+        assert len(pdf.pages) == 2
+        for page in pdf.pages:
+            assert SUBJECT in unicodedata.normalize("NFKC", page.extract_text())
         browser.close()

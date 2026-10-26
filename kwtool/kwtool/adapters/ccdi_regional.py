@@ -33,6 +33,15 @@ class RegionalCcdiAdapter(_RegionalAdapter):
         if province == "广东省":
             frame.locator("#sxt").select_option("content")
 
+    def _before_print(self, page, province, subject):
+        if province == "北京市":
+            # Each result navigation reloads the header iframe with an empty
+            # search box. Restore it on every page without submitting again.
+            search = page.frame_locator("iframe[src*='index_314.html']").locator("input[name=searchword]")
+            search.fill(subject)
+            if search.input_value() != subject:
+                raise RuntimeError("北京市纪委监委搜索栏未能恢复查询内容，未保存 PDF")
+
     def _turn_page(self, context, page, scope, province, number, signature):
         if super()._turn_page(context, page, scope, province, number, signature):
             return True

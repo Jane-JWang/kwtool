@@ -45,6 +45,9 @@ class Page:
     def frame(self, name):
         return self.browser.result
 
+    def frame_locator(self, selector):
+        return SimpleNamespace(locator=lambda selector: SimpleNamespace(fill=self.fill, input_value=lambda: self.query))
+
     def fill(self, value):
         self.query = value
         self.filled.append(value)
