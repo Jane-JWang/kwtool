@@ -13,6 +13,7 @@ A semi-automatic tool for web verification.
 - 市场监管行政处罚文书网：[cfws.samr.gov.cn](https://cfws.samr.gov.cn/list.html)
 - 百度：[www.baidu.com](https://www.baidu.com/)
 - 中国执行信息公开网：[失信被执行人](https://zxgk.court.gov.cn/gkw/html/shixin/index.html)、[被执行人信息](https://zxgk.court.gov.cn/gkw/html/zhixing/index.html)
+- 地方机关查询：注册地省级人民法院、纪委监委、人民检察院、市场监督管理局，支持广东省、浙江省、北京市、上海市。输入示例：`中信证券股份有限公司[注册地:广东省]`，逐主体选择对应官网，导出第 1 页结果；实测情况见[网站支持总表](网站支持总表.md#地方机关查询)。
 
 以下站点已接入查询适配器；其中生态环境部、应急管理部、市场监管总局、国家发展改革委和证监会两份名录已完成一次 Chrome 查询及 PDF 生成检查，其余仍待现场验证：
 
