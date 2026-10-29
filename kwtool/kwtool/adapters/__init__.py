@@ -1,6 +1,7 @@
 from kwtool.adapters.base import SiteAdapter
 from kwtool.adapters.baidu import BaiduAdapter
 from kwtool.adapters.csrc import CsrcAdapter
+from kwtool.adapters.nfra import NfraAdapter
 from kwtool.adapters.nafmii import NafmiiAdapter
 from kwtool.adapters.cfws import CfwsAdapter
 from kwtool.adapters.cnabs import CnabsAdapter
@@ -29,7 +30,7 @@ from kwtool.adapters.zhongdeng import ZhongdengAdapter
 def registered_adapters() -> dict[str, SiteAdapter]:
     """Register code-defined site adapters here."""
     adapters: tuple[SiteAdapter, ...] = (
-        GsxtAdapter(), CreditChinaAdapter(), CsrcAdapter(), CfwsAdapter(),
+        GsxtAdapter(), CreditChinaAdapter(), CsrcAdapter(), NfraAdapter(), CfwsAdapter(),
         NerisAdapter(), MofAdapter(), SseAdapter(), BaiduAdapter(),
         ShixinAdapter(), ZhixingAdapter(), WenshuAdapter(), RmfyalkAdapter(), MeeAdapter(),
         MemAdapter(), SamrAdapter(), NdrcAdapter(), StaAdapter(),
