@@ -10,6 +10,7 @@ from kwtool.adapters.csrc_filing_lists import (
     CsrcAccountingFilingAdapter, CsrcRatingFilingAdapter,
     roster_match,
 )
+from kwtool.adapters.csrc import CsrcAdapter
 
 
 @pytest.mark.parametrize("adapter_type,title,suffix", [
@@ -106,11 +107,8 @@ def test_filing_roster_saves_announcement_and_original_attachment(
     assert page.clicked
     assert context.artifacts == [
         tmp_path / "roster_附件" / f"roster.{suffix}",
-        tmp_path / "roster_附件" / "roster_核对结果.txt",
         tmp_path / "roster.pdf",
     ]
-    assert "无法判定" in context.artifacts[1].read_text(encoding="utf-8")
-    assert "说明：" not in context.artifacts[1].read_text(encoding="utf-8")
     assert page.pdf_options["scale"] == 0.35
     assert page.pdf_options["display_header_footer"] is True
 
@@ -179,3 +177,19 @@ def test_unreadable_office_file_is_unknown(tmp_path: Path) -> None:
     path = tmp_path / "bad.xlsx"
     path.write_bytes(b"not a zip")
     assert roster_match(path, "任意公司") is None
+
+
+def test_csrc_checkboxes_run_only_selected_lists(tmp_path: Path, monkeypatch) -> None:
+    called = []
+    monkeypatch.setattr(CsrcAdapter, "_search", lambda self, context, subject: called.append("search"))
+    monkeypatch.setattr(CsrcRatingFilingAdapter, "run_one", lambda self, context, subject: called.append("rating"))
+    monkeypatch.setattr(CsrcAccountingFilingAdapter, "run_one", lambda self, context, subject: called.append("accounting"))
+    context = RunContext(
+        browser=None, page=None, pdf_path=tmp_path / "out.pdf",  # type: ignore[arg-type]
+        pdf_settings=CsrcAdapter.default_pdf_settings,
+        site_settings={"search": False, "rating_filing": True, "accounting_filing": False},
+        stop_event=Event(), report_status=lambda _: None, artifacts=[],
+    )
+    CsrcAdapter().run_one(context, "样例公司")
+    assert called == ["rating"]
+    assert context.pdf_path.name == f"out_{RATING_TITLE}.pdf"

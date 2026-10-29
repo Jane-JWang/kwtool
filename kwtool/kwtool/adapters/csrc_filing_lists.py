@@ -17,7 +17,6 @@ from playwright.sync_api import Error as PlaywrightError
 
 from kwtool.adapters.base import RunContext, SiteAdapter, SiteUnavailable
 from kwtool.models import PdfSettings
-from kwtool.output import available_path
 
 
 LIST_URL = "https://www.csrc.gov.cn/csrc/c100102/common_list.shtml?channelid=266a63ac0abb4bf49fdfb8598c502bae"
@@ -87,16 +86,6 @@ def roster_match(path: Path, subject: str) -> bool | None:
     return any(needle in unit for unit in units)
 
 
-def _save_result(path: Path, subject: str, article_url: str, verdict: bool | None) -> Path:
-    outcome = {True: "命中", False: "未命中", None: "无法判定"}[verdict]
-    result_path = available_path(path.with_name(f"{path.stem}_核对结果.txt"))
-    result_path.write_text(
-        f"查询对象：{subject}\n核对结果：{outcome}\n公告网址：{article_url}\n名单附件：{path.name}\n",
-        encoding="utf-8",
-    )
-    return result_path
-
-
 class _CsrcFilingListAdapter(SiteAdapter):
     title: str
     default_pdf_settings = PdfSettings(landscape=False, scale=0.35, print_background=True)
@@ -146,11 +135,6 @@ class _CsrcFilingListAdapter(SiteAdapter):
             attachment.click()
         saved_attachment = context.save_download(download_info.value)
         context.report_status(f"已保存证监会名单原件：{saved_attachment}")
-        verdict = roster_match(saved_attachment, subject)
-        saved_result = _save_result(saved_attachment, subject, page.url, verdict)
-        context.artifacts.append(saved_result)
-        outcome = {True: "命中", False: "未命中", None: "无法判定"}[verdict]
-        context.report_status(f"证监会名单核对结果：{outcome}；{saved_result}")
 
         page.evaluate("document.fonts.ready")
         page.emulate_media(media="screen")
