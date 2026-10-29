@@ -9,6 +9,7 @@ A semi-automatic tool for web verification.
 | 国家企业信用信息公示系统（企信网） | [www.gsxt.gov.cn](https://www.gsxt.gov.cn/) |  |
 | 信用中国 | [www.creditchina.gov.cn](https://www.creditchina.gov.cn/) |  |
 | 中国证监会 | [www.csrc.gov.cn](https://www.csrc.gov.cn/) |  |
+| 国家金融监督管理总局 | [www.nfra.gov.cn/cn/view/pages/index/jiansuo.html](https://www.nfra.gov.cn/cn/view/pages/index/jiansuo.html) |  |
 | 证监会失信查询 | [neris.csrc.gov.cn/shixinchaxun](https://neris.csrc.gov.cn/shixinchaxun/) |  |
 | 财政部 | [search.mof.gov.cn/was5/web/search](https://search.mof.gov.cn/was5/web/search) |  |
 | 上海证券交易所 | [www.sse.com.cn/home/search/index.shtml](https://www.sse.com.cn/home/search/index.shtml) |  |
