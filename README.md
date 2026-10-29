@@ -13,6 +13,10 @@ A semi-automatic tool for web verification.
 | 证监会失信查询 | [neris.csrc.gov.cn/shixinchaxun](https://neris.csrc.gov.cn/shixinchaxun/) |  |
 | 财政部 | [search.mof.gov.cn/was5/web/search](https://search.mof.gov.cn/was5/web/search) |  |
 | 上海证券交易所 | [www.sse.com.cn/home/search/index.shtml](https://www.sse.com.cn/home/search/index.shtml) |  |
+| 中国证券投资基金业协会【名录】 | [公募基金管理人名录](https://www.amac.org.cn/fwdt/wyc/jgcprycx/jgcx/gmjjglrml/) | 机构名称 |
+| 中国证券投资基金业协会【检索】 | [全站搜索](https://www.amac.org.cn/index/qzss/) |  |
+| 深圳证券交易所 | [全站检索](https://www.szse.cn/application/search/index.html) |  |
+| 北京证券交易所 | [全站搜索](https://www.bse.cn/select/index/searchInfo.do) |  |
 | 市场监管行政处罚文书网 | [cfws.samr.gov.cn/list.html](https://cfws.samr.gov.cn/list.html) |  |
 | 百度 | [www.baidu.com](https://www.baidu.com/) |  |
 | 中国执行信息公开网（失信被执行人） | [zxgk.court.gov.cn/gkw/html/shixin/index.html](https://zxgk.court.gov.cn/gkw/html/shixin/index.html) | 身份证（可选） |

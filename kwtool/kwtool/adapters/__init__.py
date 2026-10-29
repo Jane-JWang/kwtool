@@ -24,6 +24,8 @@ from kwtool.adapters.ccdi_regional import RegionalCcdiAdapter
 from kwtool.adapters.prosecutor_regional import RegionalProcuratorateAdapter
 from kwtool.adapters.samr_regional import RegionalSamrAdapter
 from kwtool.adapters.sse import SseAdapter
+from kwtool.adapters.amac_roster import AmacRosterAdapter
+from kwtool.adapters.securities_search import AmacSearchAdapter, SzseAdapter, BseAdapter
 from kwtool.adapters.zxgk import ShixinAdapter, ZhixingAdapter
 from kwtool.adapters.zhongdeng import ZhongdengAdapter
 from kwtool.adapters.ministry_search import MnrAdapter, MohurdAdapter, NhcAdapter, SafeAdapter
@@ -33,7 +35,8 @@ def registered_adapters() -> dict[str, SiteAdapter]:
     """Register code-defined site adapters here."""
     adapters: tuple[SiteAdapter, ...] = (
         GsxtAdapter(), CreditChinaAdapter(), CsrcAdapter(), NfraAdapter(), CfwsAdapter(),
-        NerisAdapter(), MofAdapter(), SseAdapter(), BaiduAdapter(),
+        NerisAdapter(), MofAdapter(), SseAdapter(), AmacRosterAdapter(), AmacSearchAdapter(),
+        SzseAdapter(), BseAdapter(), BaiduAdapter(),
         ShixinAdapter(), ZhixingAdapter(), WenshuAdapter(), RmfyalkAdapter(), MeeAdapter(),
         MemAdapter(), SamrAdapter(), NdrcAdapter(), StaAdapter(),
         CcdiAdapter(), Prosecutor12309Adapter(), NafmiiAdapter(), PbocAdapter(),
