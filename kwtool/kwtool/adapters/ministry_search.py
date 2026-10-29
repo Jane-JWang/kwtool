@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from playwright.sync_api import Error as PlaywrightError
 
 from kwtool.adapters.base import RunContext, SiteAdapter, SiteUnavailable
-from kwtool.adapters.national_search import SearchSite, _NationalSearchAdapter, _allowed
+from kwtool.adapters.national_search import _allowed
 from kwtool.models import PdfSettings
 
 
@@ -87,15 +87,20 @@ class MohurdAdapter(_DirectMinistrySearch):
                      or context.page.locator(".no_results").is_visible()))
 
 
-class NhcAdapter(_NationalSearchAdapter):
+class NhcAdapter(_DirectMinistrySearch):
     key = "nhc"
     display_name = "国家卫生健康委员会"
-    site = SearchSite(
-        "https://www.nhc.gov.cn/", ("nhc.gov.cn",),
-        ("#searchInput", "input[type=search]", "input[name=q]",
-         "input[placeholder*=搜索]", "input[placeholder*=检索]"),
-        ("#toSearchBtn", "button:has-text('搜索')", "a:has-text('搜索')", "input[type=submit]"),
-    )
+    # The search form on nhc.gov.cn submits to this official search service.
+    host = "zs.kaipuyun.cn"
+    path = "/s"
+    query_key = "searchWord"
+    parameters = (("siteCode", "bm24000006"),)
+    result_markers = ("相关结果",)
+
+    def results_visible(self, context: RunContext, subject: str, body: str) -> bool:
+        return (super().results_visible(context, subject, body)
+                and parse_qs(urlparse(context.page.url).query).get("siteCode") == ["bm24000006"]
+                and context.page.locator("#allSearchWord").input_value() == subject)
 
 
 class SafeAdapter(_DirectMinistrySearch):

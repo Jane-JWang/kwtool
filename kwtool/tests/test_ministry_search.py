@@ -30,7 +30,7 @@ class Page:
         if selector == "body":
             return type("Body", (), {"inner_text": lambda self, **kwargs: self.page.body,
                                       "page": self})()
-        if selector == "#q":
+        if selector in ("#q", "#allSearchWord"):
             return type("Input", (), {"input_value": lambda self: self.page.value,
                                        "page": self})()
         if selector == ".bszn_list .comprehensiveItem":
@@ -59,6 +59,7 @@ def context_for(page: Page, tmp_path: Path) -> RunContext:
 @pytest.mark.parametrize("adapter,body,result_count", [
     (MnrAdapter(), "相关结果约0条", 0),
     (MohurdAdapter(), "查询范围：默认\n摘要中的公司名称被拆分", 2),
+    (NhcAdapter(), "相关结果0 个\n很抱歉，未找到相关的内容", 0),
     (SafeAdapter(), "搜索结果\n测试公司", 0),
 ])
 def test_direct_ministry_search_prints_confirmed_results(adapter, body, result_count, tmp_path):
@@ -90,6 +91,7 @@ def test_mohurd_prints_confirmed_empty_result_page(tmp_path):
 @pytest.mark.parametrize("adapter,body", [
     (MnrAdapter(), "自然资源部首页"),
     (MohurdAdapter(), "查询范围：默认\n热门搜索"),
+    (NhcAdapter(), "国家卫生健康委员会首页"),
     (SafeAdapter(), "全文检索\n返回首页"),
 ])
 def test_direct_ministry_search_rejects_unconfirmed_results(adapter, body, tmp_path):
