@@ -1,7 +1,7 @@
 from kwtool.adapters.base import SiteAdapter
 from kwtool.adapters.baidu import BaiduAdapter
 from kwtool.adapters.csrc import CsrcAdapter
-from kwtool.adapters.csrc_filing_lists import CsrcAccountingFilingAdapter, CsrcRatingFilingAdapter
+from kwtool.adapters.nafmii import NafmiiAdapter
 from kwtool.adapters.cfws import CfwsAdapter
 from kwtool.adapters.cnabs import CnabsAdapter
 from kwtool.adapters.creditchina import CreditChinaAdapter
@@ -33,8 +33,8 @@ def registered_adapters() -> dict[str, SiteAdapter]:
         NerisAdapter(), MofAdapter(), SseAdapter(), BaiduAdapter(),
         ShixinAdapter(), ZhixingAdapter(), WenshuAdapter(), RmfyalkAdapter(), MeeAdapter(),
         MemAdapter(), SamrAdapter(), NdrcAdapter(), StaAdapter(),
-        CcdiAdapter(), Prosecutor12309Adapter(), CsrcRatingFilingAdapter(),
-        CsrcAccountingFilingAdapter(), CnabsAdapter(), ZhongdengAdapter(),
+        CcdiAdapter(), Prosecutor12309Adapter(), NafmiiAdapter(),
+        CnabsAdapter(), ZhongdengAdapter(),
         RegionalCourtAdapter(), RegionalCcdiAdapter(), RegionalProcuratorateAdapter(), RegionalSamrAdapter(),
     )
     return {adapter.key: adapter for adapter in adapters}

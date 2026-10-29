@@ -65,6 +65,19 @@ class MainWindow(QWidget):
         self._site_values: dict[str, dict] = dict(saved_sites) if isinstance(saved_sites, dict) else {}
         saved_pdf = self._saved.get("site_pdf_settings", {})
         self._site_pdf_values: dict[str, dict] = dict(saved_pdf) if isinstance(saved_pdf, dict) else {}
+        legacy_filing = {
+            "csrc_rating_filing": "rating_filing",
+            "csrc_accounting_filing": "accounting_filing",
+        }.get(self._saved.get("site_key"))
+        if legacy_filing:
+            self._saved["site_key"] = "csrc"
+            self._site_values["csrc"] = {
+                **self._site_values.get("csrc", {}), "search": False, legacy_filing: True,
+            }
+            if "csrc" not in self._site_pdf_values:
+                self._site_pdf_values["csrc"] = self._site_pdf_values.get(
+                    "csrc_rating_filing" if legacy_filing == "rating_filing" else "csrc_accounting_filing", {}
+                )
         self._current_site_key: str | None = None
         self._site_widgets: dict[str, QWidget] = {}
         self._closing = False

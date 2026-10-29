@@ -26,8 +26,7 @@ A semi-automatic tool for web verification.
 | 中央纪委国家监委 | [www.ccdi.gov.cn](https://www.ccdi.gov.cn/) |  |
 | 12309中国检察网 | [www.12309.gov.cn](https://www.12309.gov.cn/) |  |
 | 资产证券化分析网（CNABS） | [www.cn-abs.com](https://www.cn-abs.com/) |  |
-| 证券评级机构首次备案名录 | [www.csrc.gov.cn/csrc/c100102/common_list.shtml](https://www.csrc.gov.cn/csrc/c100102/common_list.shtml?channelid=266a63ac0abb4bf49fdfb8598c502bae) |  |
-| 从事证券服务业务会计师事务所备案名录 | [www.csrc.gov.cn/csrc/c100102/common_list.shtml](https://www.csrc.gov.cn/csrc/c100102/common_list.shtml?channelid=266a63ac0abb4bf49fdfb8598c502bae) |  |
+| 交易协商会 | [www.nafmii.org.cn/hyfw/hyflmd](https://www.nafmii.org.cn/hyfw/hyflmd/) | 名单由网页专属配置选择 |
 | 中登网 | [www.zhongdengwang.org.cn/out/#/home](https://www.zhongdengwang.org.cn/out/#/home) | 身份证（可选） |
 | 注册地省级人民法院（广东、浙江、北京、上海） | 广东省：[search.gdcourts.gov.cn/search/local/208001](https://search.gdcourts.gov.cn/search/local/208001)<br>浙江省：[zjsfgkw.gov.cn](https://zjsfgkw.gov.cn/)<br>北京市：[bjgy.bjcourt.gov.cn](https://bjgy.bjcourt.gov.cn/)<br>上海市：[www.hshfy.sh.cn/shfy/web/search_zh.jsp](https://www.hshfy.sh.cn/shfy/web/search_zh.jsp) | 注册地 |
 | 注册地省级纪委监委（广东、浙江、北京、上海） | 广东省：[www.gdjct.gd.gov.cn](https://www.gdjct.gd.gov.cn/)<br>浙江省：[www.zjsjw.gov.cn](https://www.zjsjw.gov.cn/)<br>北京市：[www.bjsupervision.gov.cn](https://www.bjsupervision.gov.cn/)<br>上海市：[www.shjjjc.gov.cn](https://www.shjjjc.gov.cn/) | 注册地 |
