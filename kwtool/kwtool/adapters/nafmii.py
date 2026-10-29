@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
-from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import Error as PlaywrightError, Page
 
 from kwtool.adapters.base import RunContext, SiteAdapter, SiteUnavailable
 from kwtool.models import FieldSpec, PdfSettings
@@ -48,6 +48,13 @@ def _navigate(context: RunContext, url: str) -> None:
         raise SiteUnavailable(f"交易商协会页面不可用：{context.page.url}")
 
 
+def _reset_member_search(page: Page) -> None:
+    """Clear the site's cross-page search term before loading category rows."""
+    if page.evaluate("sessionStorage.getItem('hySearchWrod')"):
+        page.evaluate("sessionStorage.removeItem('hySearchWrod')")
+        page.reload(wait_until="domcontentloaded", timeout=60000)
+
+
 class NafmiiAdapter(SiteAdapter):
     key = "nafmii"
     display_name = "交易协商会"
@@ -77,6 +84,10 @@ class NafmiiAdapter(SiteAdapter):
             else:
                 # Member category pages fetch their rows asynchronously. Search
                 # the current subject before printing so the PDF shows its result.
+                # The site keeps the previous subject in sessionStorage and
+                # automatically reruns that search on navigation. A previous
+                # zero-result query leaves no rows, so reset that state first.
+                _reset_member_search(context.page)
                 context.wait_until(
                     lambda: context.page.locator(".yh1_hyflmd_ul li").count() > 0,
                     f"等待交易商协会会员名单加载：{item.title}", timeout_seconds=60,

@@ -5,7 +5,7 @@ import pytest
 
 from kwtool.adapters import registered_adapters
 from kwtool.adapters.base import RunContext
-from kwtool.adapters.nafmii import NafmiiAdapter, ROSTERS, _official
+from kwtool.adapters.nafmii import NafmiiAdapter, ROSTERS, _official, _reset_member_search
 
 
 def test_nafmii_is_one_site_with_eight_independent_rosters():
@@ -27,3 +27,27 @@ def test_nafmii_requires_a_selection(tmp_path: Path):
     )
     with pytest.raises(ValueError, match="至少勾选"):
         NafmiiAdapter().run_one(context, "样例公司")
+
+
+def test_previous_member_search_is_cleared_before_next_batch():
+    class Page:
+        stored = "上一批主体"
+        reloaded = False
+
+        def evaluate(self, script):
+            if "getItem" in script:
+                return self.stored
+            assert "removeItem" in script
+            self.stored = None
+
+        def reload(self, **kwargs):
+            assert kwargs == {"wait_until": "domcontentloaded", "timeout": 60000}
+            self.reloaded = True
+
+    page = Page()
+    _reset_member_search(page)  # type: ignore[arg-type]
+    assert page.stored is None
+    assert page.reloaded
+    page.reloaded = False
+    _reset_member_search(page)  # type: ignore[arg-type]
+    assert not page.reloaded
