@@ -24,6 +24,10 @@ A semi-automatic tool for web verification.
 | 国家市场监督管理总局 | [www.samr.gov.cn](https://www.samr.gov.cn/) |  |
 | 国家发展改革委 | [www.ndrc.gov.cn](https://www.ndrc.gov.cn/) |  |
 | 国家税务总局 | [www.chinatax.gov.cn](https://www.chinatax.gov.cn/) |  |
+| 自然资源部 | [www.mnr.gov.cn](https://www.mnr.gov.cn/) |  |
+| 住房和城乡建设部 | [www.mohurd.gov.cn](https://www.mohurd.gov.cn/) |  |
+| 国家卫生健康委员会 | [www.nhc.gov.cn](https://www.nhc.gov.cn/) |  |
+| 国家外汇管理局 | [www.safe.gov.cn](https://www.safe.gov.cn/) |  |
 | 中央纪委国家监委 | [www.ccdi.gov.cn](https://www.ccdi.gov.cn/) |  |
 | 12309中国检察网 | [www.12309.gov.cn](https://www.12309.gov.cn/) |  |
 | 资产证券化分析网（CNABS） | [www.cn-abs.com](https://www.cn-abs.com/) |  |
