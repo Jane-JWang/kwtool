@@ -111,6 +111,8 @@ class _RegionalAdapter(SiteAdapter):
             raise ValueError("前 K 页必须是 1 到 1000 之间的整数")
         max_pages = int(raw_pages)
         province = resolve_province(context.subject_kwargs.get("注册地", ""))
+        if province not in self.sites:
+            raise ValueError(f"{self.display_name}目前仅支持：{'、'.join(self.sites)}")
         site = self.sites[province]
         pager = self.pagers[province]
         context.check_stop()

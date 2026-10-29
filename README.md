@@ -42,3 +42,12 @@ A semi-automatic tool for web verification.
 | 注册地省级纪委监委（广东、浙江、北京、上海） | 广东省：[www.gdjct.gd.gov.cn](https://www.gdjct.gd.gov.cn/)<br>浙江省：[www.zjsjw.gov.cn](https://www.zjsjw.gov.cn/)<br>北京市：[www.bjsupervision.gov.cn](https://www.bjsupervision.gov.cn/)<br>上海市：[www.shjjjc.gov.cn](https://www.shjjjc.gov.cn/) | 注册地 |
 | 注册地省级人民检察院（广东、浙江、北京、上海） | 广东省：[www.gd.jcy.gov.cn](http://www.gd.jcy.gov.cn/)<br>浙江省：[www.zjjcy.gov.cn](https://www.zjjcy.gov.cn/)<br>北京市：[www.bjjc.gov.cn](https://www.bjjc.gov.cn/)<br>上海市：[www.sh.jcy.gov.cn](https://www.sh.jcy.gov.cn/) | 注册地 |
 | 注册地省级市场监督管理局（广东、浙江、北京、上海） | 广东省：[amr.gd.gov.cn](http://amr.gd.gov.cn/)<br>浙江省：[zjamr.zj.gov.cn](https://zjamr.zj.gov.cn/)<br>北京市：[scjgj.beijing.gov.cn](https://scjgj.beijing.gov.cn/)<br>上海市：[scjgj.sh.gov.cn](https://scjgj.sh.gov.cn/) | 注册地 |
+| 注册地省级发展改革部门（广东） | [广东省发展和改革委员会](https://drc.gd.gov.cn/) | 注册地 |
+| 注册地省级自然资源部门（广东） | [广东省自然资源厅](https://nr.gd.gov.cn/) | 注册地 |
+| 注册地省级住房城乡建设部门（广东） | [广东省住房和城乡建设厅](https://zfcxjst.gd.gov.cn/) | 注册地 |
+| 注册地省级生态环境部门（广东） | [广东省生态环境厅](https://gdee.gd.gov.cn/) | 注册地 |
+| 注册地省级税务局（广东） | [国家税务总局广东省税务局](https://guangdong.chinatax.gov.cn/) | 注册地 |
+| 注册地省级证监局（广东） | [广东证监局](https://www.csrc.gov.cn/guangdong/) | 注册地 |
+| 注册地省级金融监管局（广东） | [广东监管局](https://www.nfra.gov.cn/branch/guangdong/view/pages/index/index.html) | 注册地 |
+| 注册地省级人民银行分行（广东） | [中国人民银行广东省分行](https://guangzhou.pbc.gov.cn/) | 注册地 |
+| 注册地省级外汇局分局（广东） | [国家外汇管理局广东省分局](https://www.safe.gov.cn/guangdong/index.html) | 注册地 |
