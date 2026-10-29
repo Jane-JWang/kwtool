@@ -14,12 +14,13 @@ SUBJECT = "测试公司"
 
 class Page:
     def __init__(self, body: str, input_value: str = SUBJECT, status: int = 200,
-                 result_count: int = 0):
+                 result_count: int = 0, no_results_visible: bool = False):
         self.url = ""
         self.body = body
         self.value = input_value
         self.status = status
         self.result_count = result_count
+        self.no_results_visible = no_results_visible
 
     def goto(self, url, **kwargs):
         self.url = url
@@ -35,6 +36,9 @@ class Page:
         if selector == ".bszn_list .comprehensiveItem":
             return type("Results", (), {"count": lambda self: self.page.result_count,
                                          "page": self})()
+        if selector == ".no_results":
+            return type("NoResults", (), {"is_visible": lambda self: self.page.no_results_visible,
+                                           "page": self})()
         raise AssertionError(selector)
 
     def evaluate(self, script):
@@ -73,6 +77,14 @@ def test_mohurd_waits_for_results_after_query_box_updates(tmp_path):
     with pytest.raises(RuntimeError, match="未能确认检索结果"):
         adapter.run_one(context, SUBJECT)
     assert not context.artifacts
+
+
+def test_mohurd_prints_confirmed_empty_result_page(tmp_path):
+    adapter = MohurdAdapter()
+    page = Page("查询范围：默认\n热门搜索", no_results_visible=True)
+    context = context_for(page, tmp_path)
+    adapter.run_one(context, SUBJECT)
+    assert context.artifacts == [context.pdf_path]
 
 
 @pytest.mark.parametrize("adapter,body", [

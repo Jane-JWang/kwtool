@@ -77,13 +77,14 @@ class MohurdAdapter(_DirectMinistrySearch):
 
     def results_visible(self, context: RunContext, subject: str, body: str) -> bool:
         # The search page initially displays a cached example query. Wait for
-        # its JavaScript to replace that example and render result items.
+        # its JavaScript to replace that example and render result items or
+        # the site's no-results illustration.
         # Result snippets split matches into individual <em> characters, so
         # the complete subject often does not occur in the body text.
         return (super().results_visible(context, subject, body)
                 and context.page.locator("#q").input_value() == subject
                 and (context.page.locator(".bszn_list .comprehensiveItem").count() > 0
-                     or any(word in body for word in ("暂无结果", "未找到相关结果"))))
+                     or context.page.locator(".no_results").is_visible()))
 
 
 class NhcAdapter(_NationalSearchAdapter):
