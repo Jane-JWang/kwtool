@@ -11,6 +11,7 @@ from kwtool.models import PdfSettings
 
 
 HOST = "zxgk.court.gov.cn"
+HOME = f"https://{HOST}/"
 FIELD_SCRIPT = """({terms, value}) => {
   const inputs = [...document.querySelectorAll('input:not([type=hidden])')];
   const visible = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
@@ -39,42 +40,53 @@ class _CourtAdapter(SiteAdapter):
     default_pdf_settings = PdfSettings(scale=0.35, print_background=True)
     path: str
 
+    def _search_ready(self, page: Page) -> bool:
+        try:
+            return (urlparse(page.url).hostname == HOST
+                    and urlparse(page.url).path == self.path
+                    and page.get_by_text("查询", exact=True).last.is_visible())
+        except PlaywrightError:
+            return False  # The challenge can navigate while the page is inspected.
+
+    def _open_search_page(self, context: RunContext) -> None:
+        page = context.page
+        target = f"https://{HOST}{self.path}"
+        if self._search_ready(page):
+            return
+
+        def navigate(url: str) -> int | None:
+            try:
+                response = page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            except PlaywrightError as exc:
+                raise SiteUnavailable(f"无法打开{self.display_name}：{exc}") from exc
+            status = response.status if response else None
+            if status is not None and status >= 400 and status != 412:
+                raise SiteUnavailable(f"{self.display_name}返回 HTTP {status}")
+            return status
+
+        status = navigate(target)
+        if status == 412:
+            context.report_status("网站返回 HTTP 412，等待浏览器完成访问校验…")
+            try:
+                context.wait_until(lambda: self._search_ready(page), "等待查询页面加载…", timeout_seconds=20)
+                return
+            except TimeoutError:
+                context.check_stop()
+                context.report_status("访问校验尚未完成，正在从网站首页重新进入查询页…")
+                navigate(HOME)
+                page.wait_for_timeout(1500)
+                context.check_stop()
+                navigate(target)
+
+        try:
+            context.wait_until(lambda: self._search_ready(page), "等待查询页面加载…", timeout_seconds=60)
+        except TimeoutError as exc:
+            raise SiteUnavailable(f"{self.display_name}未加载查询表单，请检查 Chrome 页面") from exc
+
     def run_one(self, context: RunContext, subject: str) -> None:
         context.check_stop()
         page = context.page
-        target = f"https://{HOST}{self.path}"
-        initial_status = None
-        if page.url.split("?", 1)[0] != target:
-            try:
-                response = page.goto(target, wait_until="domcontentloaded", timeout=60000)
-            except PlaywrightError as exc:
-                raise SiteUnavailable(f"无法打开{self.display_name}：{exc}") from exc
-            initial_status = response.status if response else None
-            if initial_status and initial_status >= 400 and initial_status != 412:
-                raise SiteUnavailable(f"{self.display_name}返回 HTTP {initial_status}")
-            if initial_status == 412:
-                context.report_status("网站首次访问返回 HTTP 412，正在重试查询页面…")
-                page.wait_for_timeout(1500)
-                context.check_stop()
-                try:
-                    retry = page.goto(target, wait_until="domcontentloaded", timeout=60000)
-                except PlaywrightError:
-                    retry = None  # The site may navigate itself during the challenge.
-                if retry and retry.status >= 400 and retry.status != 412:
-                    raise SiteUnavailable(f"{self.display_name}重试返回 HTTP {retry.status}")
-
-        def search_ready() -> bool:
-            try:
-                return (urlparse(page.url).hostname == HOST
-                        and page.get_by_text("查询", exact=True).count() > 0)
-            except PlaywrightError:
-                return False  # The 412 challenge can navigate while we inspect the page.
-
-        try:
-            context.wait_until(search_ready, "等待查询页面加载…", timeout_seconds=60)
-        except TimeoutError as exc:
-            detail = f"HTTP {initial_status} 后" if initial_status else ""
-            raise SiteUnavailable(f"{self.display_name}{detail}未加载查询表单，请检查 Chrome 页面") from exc
+        self._open_search_page(context)
         _fill(page, ["姓名/名称", "姓名", "名称"], subject)
         _fill(page, ["身份证", "证件号码", "组织机构代码"], context.subject_kwargs.get("身份证", ""))
         results = []
@@ -89,12 +101,18 @@ class _CourtAdapter(SiteAdapter):
         try:
             context.report_status(f"正在查询{self.display_name}：{subject}；请在 Chrome 中填写验证码")
             page.get_by_text("查询", exact=True).last.click()
-            context.wait_until(
-                lambda: bool(results),
-                "请在 Chrome 中填写验证码并完成查询…", timeout_seconds=600, user_action=True,
-            )
-            if results[-1].status >= 400:
-                raise ValueError(f"查询返回 HTTP {results[-1].status}，请检查页面")
+            try:
+                context.wait_until(
+                    lambda: any(response.status != 412 for response in results),
+                    "请在 Chrome 中填写验证码并完成查询…", timeout_seconds=600, user_action=True,
+                )
+            except TimeoutError as exc:
+                if results and results[-1].status == 412:
+                    raise SiteUnavailable("查询持续返回 HTTP 412，请检查 Chrome 中的网站访问校验") from exc
+                raise
+            final_response = next(response for response in reversed(results) if response.status != 412)
+            if final_response.status >= 400:
+                raise ValueError(f"查询返回 HTTP {final_response.status}，请检查页面")
             page.wait_for_timeout(1000)
         finally:
             page.remove_listener("response", on_response)
