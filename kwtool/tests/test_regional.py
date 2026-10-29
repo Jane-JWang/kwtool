@@ -12,7 +12,8 @@ from kwtool.subjects import parse_subject
 
 
 SUBJECT = "中信证券股份有限公司"
-SITES = {key: adapter.sites for key, adapter in registered_adapters().items() if key.startswith("regional_")}
+SITES = {key: adapter.sites for key, adapter in registered_adapters().items()
+         if key in {"regional_court", "regional_ccdi", "regional_procuratorate", "regional_samr"}}
 RESULT_PATHS = {
     "regional_court": ("/search/local/208001", "/jrobot/search.do", "/article/essearch.shtml", "/shfy/web/search_zh.jsp"),
     "regional_ccdi": ("/search/all/204001", "/allsearch/", "/was5/web/search", "/TrueCMS/searchController/getResult.do"),

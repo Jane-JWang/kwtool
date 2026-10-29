@@ -23,6 +23,7 @@ from kwtool.adapters.court_regional import RegionalCourtAdapter
 from kwtool.adapters.ccdi_regional import RegionalCcdiAdapter
 from kwtool.adapters.prosecutor_regional import RegionalProcuratorateAdapter
 from kwtool.adapters.samr_regional import RegionalSamrAdapter
+from kwtool.adapters.guangdong_regional import GUANGDONG_ADAPTERS
 from kwtool.adapters.sse import SseAdapter
 from kwtool.adapters.amac_roster import AmacRosterAdapter
 from kwtool.adapters.securities_search import AmacSearchAdapter, SzseAdapter, BseAdapter
@@ -43,5 +44,6 @@ def registered_adapters() -> dict[str, SiteAdapter]:
         CnabsAdapter(), ZhongdengAdapter(),
         MnrAdapter(), MohurdAdapter(), NhcAdapter(), SafeAdapter(),
         RegionalCourtAdapter(), RegionalCcdiAdapter(), RegionalProcuratorateAdapter(), RegionalSamrAdapter(),
+        *(adapter() for adapter in GUANGDONG_ADAPTERS),
     )
     return {adapter.key: adapter for adapter in adapters}
