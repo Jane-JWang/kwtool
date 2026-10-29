@@ -1,6 +1,7 @@
 """Official full-site searches for additional national agencies."""
 from __future__ import annotations
 
+import re
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from playwright.sync_api import Error as PlaywrightError
@@ -110,4 +111,20 @@ class SafeAdapter(_DirectMinistrySearch):
     path = "/safe/search/index.html"
     query_key = "q"
     parameters = (("siteid", "safe"), ("order", "releasetime"))
-    result_markers = ("搜索结果", "检索结果", "相关结果", "没有找到", "暂无结果")
+    result_markers = ("条结果",)
+
+    def results_visible(self, context: RunContext, subject: str, body: str) -> bool:
+        # The outer page contains no results. The actual search, including
+        # zero matches, is rendered in its named iframe.
+        frame = context.page.frame(name="iframepage")
+        if frame is None:
+            return False
+        frame_url = urlparse(frame.url)
+        if (frame_url.path != "/internet_app/search"
+                or parse_qs(frame_url.query).get("siteid") != ["safe"]
+                or parse_qs(frame_url.query).get("q") != [subject]):
+            return False
+        if frame.locator("#q_search").input_value() != subject:
+            return False
+        result = frame.locator("body").inner_text(timeout=5000)
+        return re.search(r"共有\s*\d+\s*条结果", result) is not None

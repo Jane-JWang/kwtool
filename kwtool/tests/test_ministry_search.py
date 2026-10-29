@@ -14,13 +14,16 @@ SUBJECT = "测试公司"
 
 class Page:
     def __init__(self, body: str, input_value: str = SUBJECT, status: int = 200,
-                 result_count: int = 0, no_results_visible: bool = False):
+                 result_count: int = 0, no_results_visible: bool = False,
+                 frame_body: str = "", frame_query: str = SUBJECT):
         self.url = ""
         self.body = body
         self.value = input_value
         self.status = status
         self.result_count = result_count
         self.no_results_visible = no_results_visible
+        self.frame_body = frame_body
+        self.frame_query = frame_query
 
     def goto(self, url, **kwargs):
         self.url = url
@@ -41,6 +44,24 @@ class Page:
                                            "page": self})()
         raise AssertionError(selector)
 
+    def frame(self, name):
+        assert name == "iframepage"
+        if not self.frame_body:
+            return None
+        page = self
+
+        class Frame:
+            url = "https://www.safe.gov.cn/internet_app/search?siteid=safe&q=" + page.frame_query
+
+            def locator(self, selector):
+                if selector == "body":
+                    return type("Body", (), {"inner_text": lambda self, **kwargs: page.frame_body})()
+                if selector == "#q_search":
+                    return type("Input", (), {"input_value": lambda self: page.frame_query})()
+                raise AssertionError(selector)
+
+        return Frame()
+
     def evaluate(self, script):
         pass
 
@@ -56,14 +77,14 @@ def context_for(page: Page, tmp_path: Path) -> RunContext:
     return context
 
 
-@pytest.mark.parametrize("adapter,body,result_count", [
-    (MnrAdapter(), "相关结果约0条", 0),
-    (MohurdAdapter(), "查询范围：默认\n摘要中的公司名称被拆分", 2),
-    (NhcAdapter(), "相关结果0 个\n很抱歉，未找到相关的内容", 0),
-    (SafeAdapter(), "搜索结果\n测试公司", 0),
+@pytest.mark.parametrize("adapter,body,result_count,frame_body", [
+    (MnrAdapter(), "相关结果约0条", 0, ""),
+    (MohurdAdapter(), "查询范围：默认\n摘要中的公司名称被拆分", 2, ""),
+    (NhcAdapter(), "相关结果0 个\n很抱歉，未找到相关的内容", 0, ""),
+    (SafeAdapter(), "全文检索", 0, "搜索：测试公司\n共有 0 条结果"),
 ])
-def test_direct_ministry_search_prints_confirmed_results(adapter, body, result_count, tmp_path):
-    page = Page(body, result_count=result_count)
+def test_direct_ministry_search_prints_confirmed_results(adapter, body, result_count, frame_body, tmp_path):
+    page = Page(body, result_count=result_count, frame_body=frame_body)
     context = context_for(page, tmp_path)
     adapter.run_one(context, SUBJECT)
     assert parse_qs(urlparse(page.url).query)[adapter.query_key] == [SUBJECT]
@@ -88,11 +109,20 @@ def test_mohurd_prints_confirmed_empty_result_page(tmp_path):
     assert context.artifacts == [context.pdf_path]
 
 
+def test_safe_waits_for_current_query_in_result_frame(tmp_path):
+    adapter = SafeAdapter()
+    page = Page("全文检索", frame_body="共有 2 条结果", frame_query="上一家公司")
+    context = context_for(page, tmp_path)
+    with pytest.raises(RuntimeError, match="未能确认检索结果"):
+        adapter.run_one(context, SUBJECT)
+    assert not context.artifacts
+
+
 @pytest.mark.parametrize("adapter,body", [
     (MnrAdapter(), "自然资源部首页"),
     (MohurdAdapter(), "查询范围：默认\n热门搜索"),
     (NhcAdapter(), "国家卫生健康委员会首页"),
-    (SafeAdapter(), "全文检索\n返回首页"),
+    (SafeAdapter(), "全文检索\n返回首页",),
 ])
 def test_direct_ministry_search_rejects_unconfirmed_results(adapter, body, tmp_path):
     context = context_for(Page(body, input_value="托尔斯泰"), tmp_path)
